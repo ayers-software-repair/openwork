@@ -1,0 +1,108 @@
+name: Release Howland Desktop
+
+# Tag-driven release: pushing a howland-v* (or v*) tag builds every desktop OS and
+# publishes one GitHub Release carrying the Howland-branded installers. Same build
+# steps as build-electron-desktop.yml; branding is build-time only so electron-builder.yml
+# stays untouched and upstream still merges. Signing is intentionally absent (unsigned now);
+# when signing secrets exist they slot into the package step without changing this shape.
+
+on:
+  push:
+    tags:
+      - 'howland-v*'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create/attach (e.g. howland-v0.17.20)'
+        required: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: macos
+          - os: ubuntu-latest
+            artifact: linux
+          - os: windows-latest
+            artifact: windows
+          - os: windows-11-arm
+            artifact: windows-arm64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.4.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package Electron desktop (Howland installers)
+        shell: bash
+        run: |
+          pnpm --filter @openwork/desktop run build:electron
+          pnpm --dir apps/desktop exec electron-builder --config electron-builder.yml \
+            -c.productName=Howland -c.appId=com.howland.app \
+            '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
+            --publish never
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: howland-${{ matrix.artifact }}
+          path: |
+            apps/desktop/dist-electron/*.dmg
+            apps/desktop/dist-electron/*.zip
+            apps/desktop/dist-electron/*.AppImage
+            apps/desktop/dist-electron/*.tar.gz
+            apps/desktop/dist-electron/*.exe
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect installers into a flat dir
+        run: |
+          mkdir -p release
+          find artifacts -type f \( \
+            -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' \
+            -o -name '*.tar.gz' -o -name '*.exe' \) -exec cp {} release/ \;
+          echo "Installers to publish:"
+          ls -la release
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: Howland Desktop ${{ github.event.inputs.tag || github.ref_name }}
+          files: release/*
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

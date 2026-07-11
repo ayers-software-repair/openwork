@@ -101,7 +101,7 @@ jobs:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: Howland Desktop ${{ github.event.inputs.tag || github.ref_name }}
           files: release/*
-          draft: false
+          draft: true
           prerelease: false
           fail_on_unmatched_files: true
         env:

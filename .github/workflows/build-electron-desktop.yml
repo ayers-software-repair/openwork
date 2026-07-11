@@ -59,6 +59,7 @@ jobs:
       # Howland: build the FULL installers (not --dir) and brand at build time via electron-builder
       # -c overrides (zero config-file diff, so upstream still merges). --publish never = artifacts only.
       - name: Package Electron desktop (Howland installers)
+        shell: bash
         run: |
           pnpm --filter @openwork/desktop run build:electron
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.yml \

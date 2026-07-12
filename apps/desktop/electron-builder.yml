@@ -3,8 +3,6 @@
 # permissions. In-place migration from Tauri to Electron depends on this.
 appId: com.differentai.openwork
 productName: OpenWork
-# homepage is required by the Linux .deb (fpm) target; harmless for the other targets.
-homepage: https://github.com/ayers-software-repair/howland-releases
 protocols:
   - name: OpenWork
     schemes:

@@ -94,9 +94,9 @@ linux:
   # numeric dot-keys into an object {0:...,1:...}, not an array, and electron-builder does not
   # coerce it back to a target list. So multi-target Linux can't be expressed purely via `-c`;
   # this one-line list edit is the tradeoff (a small diff on an otherwise-upstream-clean file).
-  # `snap` is intentionally NOT listed here: it is built in a separate, best-effort CI step
-  # (continue-on-error) via the scalar `-c.linux.target=snap`, so its known CI flakiness cannot
-  # fail the whole Linux build and take the reliable AppImage/tar.gz/deb installers down with it.
+  # `snap` is intentionally NOT built: electron-builder's snap target fails in CI with
+  # ERR_ELECTRON_BUILDER_CANNOT_EXECUTE ("expected argument for flag '--executable'"), a known
+  # upstream defect. Rather than ship a silently-skipped step, Linux ships AppImage + tar.gz + deb.
   target:
     - AppImage
     - tar.gz

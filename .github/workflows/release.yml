@@ -55,14 +55,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # snapcraft is needed only for the best-effort snap step below (Ubuntu leg only).
-      # NOTE: snap builds in CI are finicky. They usually need LXD/multipass, or the
-      # SNAPCRAFT_BUILD_ENVIRONMENT=host (destructive, host-environment) mode used by the
-      # snap step below. This path is UNTESTED IN CI; treat the .snap as best-effort only.
-      - name: Install snapcraft (Linux snap target)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo snap install snapcraft --classic
-
       # Main package step. On Ubuntu this builds AppImage + tar.gz + deb (deb comes from the
       # electron-builder.yml linux.target list — see the comment there for why deb can't be
       # added purely via a `-c` override). Branding stays build-time-only via `-c`.
@@ -75,25 +67,6 @@ jobs:
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
             --publish never
 
-      # Best-effort snap build, isolated from the main step so its known CI flakiness cannot
-      # fail the Ubuntu leg (a failed leg skips upload, which would skip the whole release job
-      # and drop the working macOS/Windows/Linux installers). Uses the SCALAR override
-      # `-c.linux.target=snap` (a single value assigns as a string, which electron-builder
-      # accepts, unlike the unsupported indexed/array form). continue-on-error keeps it
-      # non-fatal. UNTESTED IN CI.
-      - name: Package Linux snap (best-effort, Howland)
-        if: matrix.os == 'ubuntu-latest'
-        continue-on-error: true
-        shell: bash
-        env:
-          SNAPCRAFT_BUILD_ENVIRONMENT: host
-        run: |
-          pnpm --dir apps/desktop exec electron-builder --config electron-builder.yml \
-            -c.productName=Howland -c.appId=com.howland.app \
-            '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
-            -c.linux.target=snap \
-            --publish never
-
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
@@ -104,7 +77,6 @@ jobs:
             apps/desktop/dist-electron/*.AppImage
             apps/desktop/dist-electron/*.tar.gz
             apps/desktop/dist-electron/*.deb
-            apps/desktop/dist-electron/*.snap
             apps/desktop/dist-electron/*.exe
 
   release:
@@ -131,14 +103,10 @@ jobs:
           cp "$(pick '*win-arm64*.exe')"         release/Howland-Windows-arm64.exe
           cp "$(pick '*linux-x86_64*.AppImage')" release/Howland-Linux.AppImage
           cp "$(pick '*linux-x64*.tar.gz')"      release/Howland-Linux.tar.gz
-          # deb/snap: match the bare extension, not an arch token. ${arch} in artifactName is
-          # not stable across Linux targets (AppImage renders x86_64, tar.gz renders x64) and
-          # snap may ignore the custom artifactName entirely; exactly one of each is produced
-          # by the single x64 Ubuntu leg, so the bare glob is unambiguous.
+          # deb: match the bare extension, not an arch token. ${arch} in artifactName is not
+          # stable across Linux targets (AppImage renders x86_64, tar.gz renders x64); exactly
+          # one .deb is produced by the single x64 Ubuntu leg, so the bare glob is unambiguous.
           cp "$(pick '*.deb')"                   release/Howland-Linux.deb
-          # snap is best-effort (built in a continue-on-error step); guard so an absent .snap
-          # does not fail this step under bash -e.
-          snap="$(pick '*.snap')"; if [ -n "$snap" ]; then cp "$snap" release/Howland-Linux.snap; else echo "no .snap artifact (best-effort snap build skipped or failed)"; fi
           echo "Stable-named installers:"; ls -la release
 
       # Clean product version from the tag (howland-v1.0.0 -> 1.0.0).

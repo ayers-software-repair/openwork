@@ -78,35 +78,53 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Download all installers
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Collect installers into a flat dir
+      # Rename to STABLE, version-less names so the site's latest/download/<name> URLs never change
+      # between versions (the MeridianVega trap: versioned asset names break the "latest" links).
+      - name: Collect + rename installers to stable names
         run: |
           mkdir -p release
-          find artifacts -type f \( \
-            -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' \
-            -o -name '*.tar.gz' -o -name '*.exe' \) -exec cp {} release/ \;
-          echo "Installers to publish:"
-          ls -la release
+          pick() { find artifacts -type f -name "$1" | head -1; }
+          cp "$(pick '*mac*.dmg')"               release/Howland-macOS.dmg
+          cp "$(pick '*mac*.zip')"               release/Howland-macOS.zip
+          cp "$(pick '*win-x64*.exe')"           release/Howland-Windows.exe
+          cp "$(pick '*win-arm64*.exe')"         release/Howland-Windows-arm64.exe
+          cp "$(pick '*linux-x86_64*.AppImage')" release/Howland-Linux.AppImage
+          cp "$(pick '*linux-x64*.tar.gz')"      release/Howland-Linux.tar.gz
+          echo "Stable-named installers:"; ls -la release
 
-      # Publish the installers to the PRIVATE Howland releases repo (meridianvega pattern) via a PAT, so
-      # distribution artifacts land automatically on every tag with NO manual upload. The howland repo is
-      # PRIVATE, so this release is NOT public. RELEASES_PAT = a token with contents:write on
-      # ayers-software-repair/howland, set as an Actions secret on this fork. The site-maintainer then
-      # fetches with: gh release download <tag> --repo ayers-software-repair/howland.
-      - name: Publish installers to the Howland releases repo (private)
+      # Clean product version from the tag (howland-v1.0.0 -> 1.0.0).
+      - name: Version
+        id: v
+        run: echo "version=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-)?v?//')" >> "$GITHUB_OUTPUT"
+
+      # Release notes: direct and factual, no marketing, no fluff, no hyphens or em dashes.
+      - name: Release notes
+        run: |
+          cat > notes.md <<'EOF'
+          Howland Desktop. Cowork, artifacts, and code on your own Howland server. Free and private.
+
+          Download for macOS (Apple Silicon), Windows (x64 or ARM64), or Linux (x86_64) below.
+
+          Something broken? File it: https://github.com/ayers-software-repair/howland-releases/issues/new
+          EOF
+
+      # Publish to the PUBLIC howland-releases repo (the public download + issues home). PUBLIC so the site
+      # links to /releases/latest/download/<StableName> — always current, zero redeploy. RELEASES_PAT = a
+      # token with contents:write on ayers-software-repair/howland-releases, set as a secret on this fork.
+      - name: Publish to the public releases repo
         uses: softprops/action-gh-release@v2
         with:
-          repository: ayers-software-repair/howland
+          repository: ayers-software-repair/howland-releases
           token: ${{ secrets.RELEASES_PAT }}
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: Howland Desktop ${{ github.event.inputs.tag || github.ref_name }} — installers
+          name: Howland Desktop ${{ steps.v.outputs.version }}
+          body_path: notes.md
           files: release/*
           draft: false
           prerelease: false

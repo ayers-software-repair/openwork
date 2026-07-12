@@ -95,14 +95,19 @@ jobs:
           echo "Installers to publish:"
           ls -la release
 
-      - name: Publish GitHub Release
+      # Publish the installers to the PRIVATE Howland releases repo (meridianvega pattern) via a PAT, so
+      # distribution artifacts land automatically on every tag with NO manual upload. The howland repo is
+      # PRIVATE, so this release is NOT public. RELEASES_PAT = a token with contents:write on
+      # ayers-software-repair/howland, set as an Actions secret on this fork. The site-maintainer then
+      # fetches with: gh release download <tag> --repo ayers-software-repair/howland.
+      - name: Publish installers to the Howland releases repo (private)
         uses: softprops/action-gh-release@v2
         with:
+          repository: ayers-software-repair/howland
+          token: ${{ secrets.RELEASES_PAT }}
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: Howland Desktop ${{ github.event.inputs.tag || github.ref_name }}
+          name: Howland Desktop ${{ github.event.inputs.tag || github.ref_name }} — installers
           files: release/*
-          draft: true
+          draft: false
           prerelease: false
           fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

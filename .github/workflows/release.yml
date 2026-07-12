@@ -79,6 +79,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout (for RELEASE_NOTES.md)
+        uses: actions/checkout@v4
+
       - name: Download all installers
         uses: actions/download-artifact@v4
         with:
@@ -103,20 +106,10 @@ jobs:
         id: v
         run: echo "version=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-)?v?//')" >> "$GITHUB_OUTPUT"
 
-      # Release notes: direct and factual, no marketing, no fluff, no hyphens or em dashes.
-      - name: Release notes
-        run: |
-          cat > notes.md <<'EOF'
-          Howland Desktop. Cowork, artifacts, and code on your own Howland server. Free and private.
-
-          Download for macOS (Apple Silicon), Windows (x64 or ARM64), or Linux (x86_64) below.
-
-          Something broken? File it: https://github.com/ayers-software-repair/howland-releases/issues/new
-          EOF
-
       # Publish to the PUBLIC howland-releases repo (the public download + issues home). PUBLIC so the site
-      # links to /releases/latest/download/<StableName> — always current, zero redeploy. RELEASES_PAT = a
+      # links to /releases/latest/download/<StableName>, always current, zero redeploy. RELEASES_PAT = a
       # token with contents:write on ayers-software-repair/howland-releases, set as a secret on this fork.
+      # Notes come from RELEASE_NOTES.md in this repo; edit that file per version to tune the release notes.
       - name: Publish to the public releases repo
         uses: softprops/action-gh-release@v2
         with:
@@ -124,7 +117,7 @@ jobs:
           token: ${{ secrets.RELEASES_PAT }}
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: Howland Desktop ${{ steps.v.outputs.version }}
-          body_path: notes.md
+          body_path: RELEASE_NOTES.md
           files: release/*
           draft: false
           prerelease: false

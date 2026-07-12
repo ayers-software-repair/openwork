@@ -56,14 +56,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # snapcraft is needed only for the best-effort snap step below (Ubuntu leg only).
-      # NOTE: snap builds in CI are finicky. They usually need LXD/multipass, or the
-      # SNAPCRAFT_BUILD_ENVIRONMENT=host (destructive, host-environment) mode used below.
-      # This path is UNTESTED IN CI; treat the .snap as best-effort only.
-      - name: Install snapcraft (Linux snap target)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo snap install snapcraft --classic
-
       # Howland: build the FULL installers (not --dir) and brand at build time via electron-builder
       # -c overrides. On Ubuntu this produces AppImage + tar.gz + deb (deb from the
       # electron-builder.yml linux.target list). --publish never = artifacts only.
@@ -74,23 +66,6 @@ jobs:
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.yml \
             -c.productName=Howland -c.appId=com.howland.app \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
-            --publish never
-
-      # Best-effort snap build, isolated from the main step so its known CI flakiness cannot
-      # fail the Ubuntu leg. Uses the SCALAR override `-c.linux.target=snap` (single value
-      # assigns as a string, which electron-builder accepts, unlike the unsupported indexed
-      # array form). continue-on-error keeps it non-fatal. UNTESTED IN CI.
-      - name: Package Linux snap (best-effort, Howland)
-        if: matrix.os == 'ubuntu-latest'
-        continue-on-error: true
-        shell: bash
-        env:
-          SNAPCRAFT_BUILD_ENVIRONMENT: host
-        run: |
-          pnpm --dir apps/desktop exec electron-builder --config electron-builder.yml \
-            -c.productName=Howland -c.appId=com.howland.app \
-            '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
-            -c.linux.target=snap \
             --publish never
 
       - name: Upload Howland installers

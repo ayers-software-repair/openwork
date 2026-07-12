@@ -1,0 +1,19 @@
+# Capacitor-generated native projects. The CI workflow regenerates these on the runner
+# via `npx cap add android` / `npx cap add ios`, so they are not committed here. For a
+# production setup, run `npx cap add ios` / `npx cap add android` locally and COMMIT the
+# generated android/ and ios/ folders so you control signing config, versioning, icons,
+# splash screens, and native plugins. Then remove these two ignores.
+/android/
+/ios/
+
+# Deps and staged web bundle (copied from apps/app/dist before `cap sync`).
+/node_modules/
+/dist/
+/www/
+
+# Mobile build outputs
+*.apk
+*.aab
+*.ipa
+
+.DS_Store

@@ -87,9 +87,20 @@ linux:
         - versions.json
         - versions.json-aarch64-unknown-linux-gnu
         - versions.json-x86_64-unknown-linux-gnu
+  # Howland: `deb` is added here as the fallback for multi-target Linux builds. The CI
+  # workflows brand via `-c` overrides to keep this file upstream-clean, but electron-builder
+  # v25's dotted-index CLI form `-c.linux.target.0=AppImage -c.linux.target.1=tar.gz ...` does
+  # NOT work: yargs-parser (with electron-builder's `camel-case-expansion:false` config) turns
+  # numeric dot-keys into an object {0:...,1:...}, not an array, and electron-builder does not
+  # coerce it back to a target list. So multi-target Linux can't be expressed purely via `-c`;
+  # this one-line list edit is the tradeoff (a small diff on an otherwise-upstream-clean file).
+  # `snap` is intentionally NOT listed here: it is built in a separate, best-effort CI step
+  # (continue-on-error) via the scalar `-c.linux.target=snap`, so its known CI flakiness cannot
+  # fail the whole Linux build and take the reliable AppImage/tar.gz/deb installers down with it.
   target:
     - AppImage
     - tar.gz
+    - deb
 win:
   icon: resources/icons/icon.ico
   extraResources:

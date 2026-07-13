@@ -124,7 +124,9 @@ jobs:
           repository: ayers-software-repair/howland-releases
           token: ${{ secrets.RELEASES_PAT }}
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: Howland Desktop ${{ steps.v.outputs.version }}
+          # All families (desktop, mobile, server) share ONE release per version; the title is the
+          # plain product+version so whichever workflow publishes last leaves the same name.
+          name: Howland ${{ steps.v.outputs.version }}
           body_path: RELEASE_NOTES.md
           files: release/*
           draft: false

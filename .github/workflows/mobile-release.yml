@@ -362,16 +362,19 @@ jobs:
         run: echo "version=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-(mobile-)?)?v?//')" >> "$GITHUB_OUTPUT"
 
       # Publish only if at least one signed artifact was produced. RELEASES_PAT = a token with
-      # contents:write on ayers-software-repair/howland-releases. On a shared howland-v* tag this
-      # appends the mobile assets to the desktop release (last writer sets the title).
+      # contents:write on ayers-software-repair/howland-releases.
+      # ONE RELEASE TRAIN: all families (desktop, mobile, server) publish onto the SAME
+      # howland-v<version> release — /releases/latest/download/<name> resolves assets on the single
+      # latest release only, so a separate mobile release would 404 every other family's links.
+      # A howland-mobile-v1.0.0 source tag therefore maps to release tag howland-v1.0.0.
       - name: Publish to the public releases repo
         if: ${{ hashFiles('release/*') != '' }}
         uses: softprops/action-gh-release@v2
         with:
           repository: ayers-software-repair/howland-releases
           token: ${{ secrets.RELEASES_PAT }}
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: Howland Mobile ${{ steps.v.outputs.version }}
+          tag_name: howland-v${{ steps.v.outputs.version }}
+          name: Howland ${{ steps.v.outputs.version }}
           body_path: RELEASE_NOTES.md
           files: release/*
           draft: false

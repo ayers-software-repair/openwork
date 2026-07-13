@@ -381,6 +381,8 @@ jobs:
             src="$(find artifacts -type f -name "$f" | head -1)"
             if [ -n "$src" ]; then cp "$src" "release/$f"; else echo "absent (unsigned/skipped): $f"; fi
           done
+          # Integrity: checksums published next to the binaries (sha256sum -c SHA256SUMS-mobile.txt).
+          if ls release/Howland-* >/dev/null 2>&1; then ( cd release && sha256sum Howland-* > SHA256SUMS-mobile.txt ); fi
           echo "Mobile release assets:"; ls -la release || true
 
       # Clean product version from the tag (howland-mobile-v1.0.0 / howland-v1.0.0 -> 1.0.0).

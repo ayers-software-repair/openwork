@@ -22,6 +22,9 @@ jobs:
         include:
           - os: macos-latest
             artifact: macos
+          # Both Mac architectures build (see release.yml for the rationale).
+          - os: macos-15-intel
+            artifact: macos-intel
           - os: ubuntu-latest
             artifact: linux
           - os: windows-latest

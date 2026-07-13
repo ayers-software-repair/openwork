@@ -86,6 +86,18 @@ jobs:
           if [ ! -d android ]; then npx cap add android; fi
           npx cap sync android
 
+      # Howland servers are self hosted and speak plain http on the user's LAN/tailnet, so the
+      # app must be allowed cleartext traffic. capacitor.config.ts sets cleartext, and this
+      # makes it explicit in the generated manifest regardless of Capacitor version behavior.
+      - name: Allow self-hosted http servers (Android)
+        working-directory: mobile
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'usesCleartextTraffic' "$M"; then
+            sed -i 's/<application /<application android:usesCleartextTraffic="true" /' "$M"
+          fi
+          grep -o 'usesCleartextTraffic="[^"]*"' "$M"
+
       # Signing gate. Secrets context is not reliably usable directly in step `if:`, so map the
       # keystore secret to env and derive a plain boolean output the later steps gate on.
       - name: Detect Android signing
@@ -188,6 +200,19 @@ jobs:
         run: |
           if [ ! -d ios ]; then npx cap add ios; fi
           npx cap sync ios
+
+      # Same self-hosted reality on iOS: ATS blocks plain http by default, but the user's
+      # Howland box is http on their LAN or tailnet by design. Arbitrary loads with a clear
+      # justification is the established pattern for self-hosted server clients.
+      - name: Allow self-hosted http servers (iOS ATS)
+        working-directory: mobile
+        run: |
+          P=ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity' "$P" >/dev/null 2>&1 || \
+            /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity dict' "$P"
+          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity:NSAllowsArbitraryLoads' "$P" >/dev/null 2>&1 || \
+            /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true' "$P"
+          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity' "$P"
 
       - name: Install CocoaPods dependencies
         working-directory: mobile/ios/App

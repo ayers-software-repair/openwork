@@ -29,9 +29,13 @@ function resolveAppVersion(app) {
   }
   return _cachedAppVersion;
 }
+// Howland: the update feed points at HOWLAND's releases, never upstream OpenWork — the upstream
+// feed would offer stock OpenWork as an "update" and overwrite this build. Howland releases carry
+// no electron-updater metadata yet (stable asset names, one release train), so update checks
+// resolve to no-update until versioned updater metadata ships; they can never pull upstream.
 const ELECTRON_UPDATER_FEEDS = Object.freeze({
-  stable: "https://github.com/different-ai/openwork/releases/latest/download",
-  alpha: "https://github.com/different-ai/openwork/releases/download/alpha-macos-latest",
+  stable: "https://github.com/ayers-software-repair/howland-releases/releases/latest/download",
+  alpha: "https://github.com/ayers-software-repair/howland-releases/releases/latest/download",
 });
 
 function normalizeElectronUpdaterChannel(value) {

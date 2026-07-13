@@ -70,6 +70,7 @@ jobs:
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.yml \
             -c.productName=Howland -c.appId=com.howland.app \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
+            -c.publish.0.owner=ayers-software-repair -c.publish.0.repo=howland-releases \
             --publish never
 
       - name: Upload installers

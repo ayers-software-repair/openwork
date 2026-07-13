@@ -59,8 +59,8 @@ let currentDisplayAppName = APP_NAME;
 const APP_IDENTIFIER =
   process.env.OPENWORK_ELECTRON_APP_IDENTIFIER?.trim() ||
   (isDevMode ? DEV_APP_IDENTIFIER : TAURI_APP_IDENTIFIER);
-const RELEASE_DOWNLOAD_BASE_URL = "https://github.com/different-ai/openwork/releases/latest/download";
-const RELEASE_PAGE_URL = "https://github.com/different-ai/openwork/releases/latest";
+const RELEASE_DOWNLOAD_BASE_URL = "https://github.com/ayers-software-repair/howland-releases/releases/latest/download";
+const RELEASE_PAGE_URL = "https://github.com/ayers-software-repair/howland-releases/releases/latest";
 const DOCS_PAGE_URL = "https://openworklabs.com/docs";
 // Howland: Help -> Report a Problem opens the public issue tracker (the howland-releases repo).
 const REPORT_ISSUE_URL = "https://github.com/ayers-software-repair/howland-releases/issues/new";

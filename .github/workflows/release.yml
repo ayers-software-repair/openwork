@@ -116,6 +116,8 @@ jobs:
           # stable across Linux targets (AppImage renders x86_64, tar.gz renders x64); exactly
           # one .deb is produced by the single x64 Ubuntu leg, so the bare glob is unambiguous.
           cp "$(pick '*.deb')"                   release/Howland-Linux.deb
+          # Integrity: checksums published next to the binaries (sha256sum -c SHA256SUMS-desktop.txt).
+          ( cd release && sha256sum Howland-* > SHA256SUMS-desktop.txt )
           echo "Stable-named installers:"; ls -la release
 
       # Clean product version from the tag (howland-v1.0.0 -> 1.0.0).

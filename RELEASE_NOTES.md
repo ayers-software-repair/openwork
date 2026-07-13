@@ -23,5 +23,6 @@ Howland Mobile
 - iOS and Android apps that connect to your machines. Built and pipeline proven; they publish
   here the moment app store signing is in place.
 
+Verify a download: each family publishes a SHA256SUMS file on this release (sha256sum -c).
 Installers are unsigned for now; expect an unidentified developer prompt on first launch.
 Something broken? File it: https://github.com/ayers-software-repair/howland-releases/issues

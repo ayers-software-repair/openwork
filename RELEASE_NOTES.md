@@ -1,28 +1,43 @@
-Howland 1.0.0
+## Howland 1.0.0
 
-Cowork, artifacts, and code on your own hardware. Free and private. One release carries every
-download: the desktop clients, the server, and the mobile apps when store signing lands.
+Cowork, artifacts, and code on your own hardware. Free and private.
 
-Howland Server
-- A menu bar / system tray app. Run it on the machine that hosts the models and the Library; it
-  sets up and keeps the shared services running and opens every dashboard: the hub, the Library,
-  the offline world map, and the monitor.
-- Attach-first: a service already running is left untouched.
-- /connect: your box configures any other machine on your network with one command.
-- Thin or full: the installer below pulls content to your drives, or build a Howland Drive with
-  howland-setup bundle for fully offline installs.
-- macOS (universal) is the supported server platform today. Windows and Linux server builds are
-  preview: the tray and hub run, but the model engine is not wired up on those systems yet.
+Every download lives on this page. Most people want two things: the server on the machine with
+the storage, and the desktop app on the machine where they work.
 
-Howland Desktop
-- Chat, artifacts, and a coding agent that edits the files on your machine, thinking on your
-  server's models. Both Mac architectures ship: Howland-macOS.dmg is Apple Silicon,
-  Howland-macOS-Intel.dmg is Intel.
+## Howland Server
 
-Howland Mobile
-- iOS and Android apps that connect to your machines. Built and pipeline proven; they publish
-  here the moment app store signing is in place.
+The box. Install it on the machine that will hold your models and your library. It lives in the
+menu bar or system tray, starts everything for you, and opens each of its pages from one menu:
+the hub, the library, the world map, and the monitor.
 
-Verify a download: each family publishes a SHA256SUMS file on this release (sha256sum -c).
-Installers are unsigned for now; expect an unidentified developer prompt on first launch.
-Something broken? File it: https://github.com/ayers-software-repair/howland-releases/issues
+- Mac: Howland-Server-macOS.dmg (works on Apple Silicon and Intel).
+- Windows and Linux server builds are early previews. They run the hub and the library, but not
+  the models yet. The Mac is the full server today.
+- To connect another machine, open http://YOUR-BOX:31052/connect on it and run the one command
+  shown there.
+- For a fully offline setup, run: howland-setup bundle /Volumes/YourDrive
+  This fills a portable drive with everything, about 860 GB, so you can install on machines that
+  never touch the internet.
+
+## Howland Desktop
+
+Chat, artifacts, and a coding agent that works on the files on your machine, using your server
+for the thinking.
+
+- Mac with Apple Silicon: Howland-macOS.dmg
+- Mac with an Intel chip: Howland-macOS-Intel.dmg
+- Windows: Howland-Windows.exe
+- Linux: Howland-Linux.AppImage or Howland-Linux.deb
+
+## Howland Mobile
+
+The iPhone, iPad, and Android apps are finished. They appear here the moment our app store
+accounts are approved.
+
+## Good to know
+
+- The installers are not signed yet, so your computer will warn about an unidentified developer
+  the first time you open one. That warning goes away once signing is in place.
+- Every download can be verified against the SHA256SUMS files published on this page.
+- Something broken? Tell us: https://github.com/ayers-software-repair/howland-releases/issues

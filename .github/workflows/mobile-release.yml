@@ -93,8 +93,10 @@ jobs:
         working-directory: mobile
         run: |
           M=android/app/src/main/AndroidManifest.xml
+          # The generated manifest puts <application on its own line (attributes follow on the
+          # next lines), so match the bare tag, not "<application ".
           if ! grep -q 'usesCleartextTraffic' "$M"; then
-            sed -i 's/<application /<application android:usesCleartextTraffic="true" /' "$M"
+            sed -i 's/<application/<application android:usesCleartextTraffic="true"/' "$M"
           fi
           grep -o 'usesCleartextTraffic="[^"]*"' "$M"
 

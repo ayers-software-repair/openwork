@@ -25,6 +25,11 @@ jobs:
         include:
           - os: macos-latest
             artifact: macos
+          # Intel Macs get a native x64 build: users' machines are unknown, so both Mac
+          # architectures ship. macos-15-intel is GitHub's x64 image (supported into 2027);
+          # process.arch=x64 there makes prepare-sidecar fetch the x86_64 opencode automatically.
+          - os: macos-15-intel
+            artifact: macos-intel
           - os: ubuntu-latest
             artifact: linux
           - os: windows-latest
@@ -97,8 +102,12 @@ jobs:
         run: |
           mkdir -p release
           pick() { find artifacts -type f -name "$1" | head -1; }
-          cp "$(pick '*mac*.dmg')"               release/Howland-macOS.dmg
-          cp "$(pick '*mac*.zip')"               release/Howland-macOS.zip
+          # Two mac architectures build now, so the globs are arch-specific (artifactName
+          # renders howland-mac-arm64-* and howland-mac-x64-*).
+          cp "$(pick '*mac-arm64*.dmg')"         release/Howland-macOS.dmg
+          cp "$(pick '*mac-arm64*.zip')"         release/Howland-macOS.zip
+          cp "$(pick '*mac-x64*.dmg')"           release/Howland-macOS-Intel.dmg
+          cp "$(pick '*mac-x64*.zip')"           release/Howland-macOS-Intel.zip
           cp "$(pick '*win-x64*.exe')"           release/Howland-Windows.exe
           cp "$(pick '*win-arm64*.exe')"         release/Howland-Windows-arm64.exe
           cp "$(pick '*linux-x86_64*.AppImage')" release/Howland-Linux.AppImage

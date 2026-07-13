@@ -33,9 +33,12 @@ const config: CapacitorConfig = {
   webDir: "dist",
   server: {
     androidScheme: "https",
-    ...(serverUrl
-      ? { url: serverUrl, cleartext: serverUrl.startsWith("http://") }
-      : {}),
+    // Howland servers are self hosted on the user's LAN or tailnet and speak plain http
+    // (http://10.x.x.x:8095 style). cleartext is therefore ALWAYS on, not only for a
+    // build-time server.url: the shipped app must be able to connect to whatever box the
+    // user owns. iOS gets the matching ATS exception in the release workflow.
+    cleartext: true,
+    ...(serverUrl ? { url: serverUrl } : {}),
     ...(allowNavigation.length > 0 ? { allowNavigation } : {}),
   },
 };

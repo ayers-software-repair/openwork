@@ -62,9 +62,12 @@ const APP_IDENTIFIER =
 const RELEASE_DOWNLOAD_BASE_URL = "https://github.com/different-ai/openwork/releases/latest/download";
 const RELEASE_PAGE_URL = "https://github.com/different-ai/openwork/releases/latest";
 const DOCS_PAGE_URL = "https://openworklabs.com/docs";
+// Howland: Help -> Report a Problem opens the public issue tracker (the howland-releases repo).
+const REPORT_ISSUE_URL = "https://github.com/ayers-software-repair/howland-releases/issues/new";
 const applicationMenu = createApplicationMenu({
   appName: APP_NAME,
   docsUrl: DOCS_PAGE_URL,
+  reportIssueUrl: REPORT_ISSUE_URL,
   getWindow: () => createMainWindow(),
 });
 

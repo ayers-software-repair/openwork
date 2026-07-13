@@ -10,7 +10,7 @@ const NATIVE_MENU_TOGGLE_SIDEBAR_EVENT = "openwork:native-menu:toggle-sidebar";
 const NATIVE_MENU_CHECK_UPDATES_EVENT = "openwork:native-menu:check-updates";
 const NATIVE_MENU_ZOOM_EVENT = "openwork:native-menu:zoom";
 
-export function createApplicationMenu({ appName, docsUrl, getWindow }) {
+export function createApplicationMenu({ appName, docsUrl, reportIssueUrl, getWindow }) {
   let applicationMenuVisible = process.platform === "darwin";
   let currentAppName = appName;
 
@@ -211,6 +211,18 @@ export function createApplicationMenu({ appName, docsUrl, getWindow }) {
               await shell.openExternal(docsUrl);
             },
           },
+          // Optional: a direct line to the product's public issue tracker. Rendered only when
+          // the embedder passes reportIssueUrl, so builds without one see no change.
+          ...(reportIssueUrl
+            ? [
+                {
+                  label: "Report a Problem",
+                  click: async () => {
+                    await shell.openExternal(reportIssueUrl);
+                  },
+                },
+              ]
+            : []),
         ],
       },
     ]);

@@ -64,6 +64,10 @@ jobs:
       # electron-builder.yml linux.target list). --publish never = artifacts only.
       - name: Package Electron desktop (Howland installers)
         shell: bash
+        env:
+          # Kill upstream analytics: an empty key disables PostHog in any build (the resolver
+          # otherwise falls back to upstream's hardcoded default key in prod builds).
+          VITE_OPENWORK_POSTHOG_KEY: ""
         run: |
           pnpm --filter @openwork/desktop run build:electron
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.yml \

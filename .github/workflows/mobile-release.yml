@@ -64,6 +64,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build web bundle (apps/app)
+        env:
+          VITE_OPENWORK_POSTHOG_KEY: ""
         run: pnpm --filter @openwork/app run build:web
 
       # Stage the web bundle where capacitor.config.ts expects it (webDir: dist).
@@ -185,6 +187,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build web bundle (apps/app)
+        env:
+          VITE_OPENWORK_POSTHOG_KEY: ""
         run: pnpm --filter @openwork/app run build:web
 
       - name: Stage web bundle into mobile/dist

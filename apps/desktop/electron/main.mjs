@@ -69,6 +69,7 @@ const applicationMenu = createApplicationMenu({
   docsUrl: DOCS_PAGE_URL,
   reportIssueUrl: REPORT_ISSUE_URL,
   getWindow: () => createMainWindow(),
+  howlandUrls: resolveHowlandUrls,
 });
 
 const uiControlServer = createUiControlServer({
@@ -930,6 +931,54 @@ function flushPendingDeepLinks() {
   if (!mainWindow?.webContents || pendingDeepLinks.length === 0) return;
   const urls = pendingDeepLinks.splice(0, pendingDeepLinks.length);
   mainWindow.webContents.send(NATIVE_DEEP_LINK_EVENT, urls);
+}
+
+// Howland's server address comes from the agent config the server itself wrote (/connect), so the
+// app follows wherever the server actually is: localhost, a LAN name, or a tailnet name. The hub
+// reports which ports its services ended up on, since a port conflict can move one.
+const HOWLAND_DEFAULT_PORTS = { brain: 31050, library: 31051, hub: 31052, search: 31053 };
+
+async function howlandServerHost() {
+  try {
+    const raw = await readFile(path.join(globalOpencodeRoot(), "opencode.json"), "utf8");
+    const cfg = JSON.parse(raw);
+    for (const provider of Object.values(cfg?.provider ?? {})) {
+      const baseUrl = provider?.options?.baseURL;
+      if (typeof baseUrl === "string" && baseUrl) return new URL(baseUrl).hostname;
+    }
+  } catch {
+    // No config yet, or unreadable: fall through to the local server.
+  }
+  return "127.0.0.1";
+}
+
+async function resolveHowlandUrls() {
+  const host = await howlandServerHost();
+  const hub = `http://${host}:${HOWLAND_DEFAULT_PORTS.hub}`;
+  const ports = { ...HOWLAND_DEFAULT_PORTS };
+  try {
+    const response = await fetch(`${hub}/status`, { signal: AbortSignal.timeout(2000) });
+    if (response.ok) {
+      const status = await response.json();
+      for (const service of status?.services ?? []) {
+        const port = Number(/:(\d+)$/.exec(service?.url ?? "")?.[1]);
+        if (!port) continue;
+        if (service.name === "Library") ports.library = port;
+        if (service.name === "Search") ports.search = port;
+      }
+    }
+  } catch {
+    // The server may be off or slow; the defaults still point at the right place.
+  }
+  return {
+    hub,
+    library: `http://${host}:${ports.library}`,
+    search: `http://${host}:${ports.search}`,
+    navigator: `${hub}/maps`,
+    monitor: `${hub}/monitor`,
+    connect: `${hub}/connect`,
+    settings: `${hub}/settings`,
+  };
 }
 
 function configHomePath() {

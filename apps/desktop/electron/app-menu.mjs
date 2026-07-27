@@ -10,7 +10,7 @@ const NATIVE_MENU_TOGGLE_SIDEBAR_EVENT = "openwork:native-menu:toggle-sidebar";
 const NATIVE_MENU_CHECK_UPDATES_EVENT = "openwork:native-menu:check-updates";
 const NATIVE_MENU_ZOOM_EVENT = "openwork:native-menu:zoom";
 
-export function createApplicationMenu({ appName, docsUrl, reportIssueUrl, getWindow }) {
+export function createApplicationMenu({ appName, docsUrl, reportIssueUrl, getWindow, howlandUrls }) {
   let applicationMenuVisible = process.platform === "darwin";
   let currentAppName = appName;
 
@@ -42,6 +42,15 @@ export function createApplicationMenu({ appName, docsUrl, reportIssueUrl, getWin
   async function zoomFromNativeMenu(action) {
     const win = await getWindow();
     win.webContents.send(NATIVE_MENU_ZOOM_EVENT, action);
+  }
+
+  // The Howland menu makes this app the front door to the whole server: every dashboard the
+  // server offers is one click away. Resolving the address is async (it reads the agent's
+  // configured server and asks it which ports its services are on), so it happens per click.
+  async function openHowland(part) {
+    const urls = await howlandUrls();
+    const target = urls?.[part];
+    if (target) await shell.openExternal(target);
   }
 
   function install() {
@@ -191,6 +200,25 @@ export function createApplicationMenu({ appName, docsUrl, reportIssueUrl, getWin
               ]),
         ],
       },
+      // Rendered only when the embedder supplies a resolver, so builds without a server see no change.
+      ...(howlandUrls
+        ? [
+            {
+              label: "Howland",
+              submenu: [
+                { label: "Hub", click: () => void openHowland("hub") },
+                { type: "separator" },
+                { label: "Library", click: () => void openHowland("library") },
+                { label: "Navigator", click: () => void openHowland("navigator") },
+                { label: "Search", click: () => void openHowland("search") },
+                { type: "separator" },
+                { label: "Monitor", click: () => void openHowland("monitor") },
+                { label: "Set Up Another Computer", click: () => void openHowland("connect") },
+                { label: "Server Settings", click: () => void openHowland("settings") },
+              ],
+            },
+          ]
+        : []),
       {
         role: "help",
         submenu: [

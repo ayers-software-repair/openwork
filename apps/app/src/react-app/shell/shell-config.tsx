@@ -36,19 +36,21 @@ export type ShellConfig = {
 /*  Defaults                                                           */
 /* ------------------------------------------------------------------ */
 
+// Howland ships a self-hosted product with no cloud account behind it, so the surfaces that lead
+// to one are off by default. Everything here stays user-toggleable in Settings.
 export const DEFAULT_SHELL_CONFIG: ShellConfig = {
-  appName: "OpenWork",
+  appName: "Howland",
   statusBar: true,
   sidebar: true,
   docsButton: true,
   feedbackButton: true,
-  cloudSignin: true,
+  cloudSignin: false,
   welcomePage: true,
   starterCards: true,
   modelPicker: true,
   browser: true,
   addWorkspace: true,
-  notifications: true,
+  notifications: false,
 };
 
 /* ------------------------------------------------------------------ */

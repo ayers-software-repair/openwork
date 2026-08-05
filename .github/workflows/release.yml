@@ -77,8 +77,8 @@ jobs:
             -c.mac.icon=resources/icons/howland-icon.png \
             -c.win.icon=resources/icons/howland-icon.png \
             -c.linux.icon=resources/icons/howland-icon.png \
-            -c.description="Howland - private, self-hosted offline AI and complete offline survival library" \
-            -c.linux.description="Howland - private, self-hosted offline AI and complete offline survival library" \
+            -c.description="Howland - private, offline, self-hosted AI and survival library" \
+            -c.linux.description="Howland - private, offline, self-hosted AI and survival library" \
             -c.publish.0.owner=ayers-software-repair -c.publish.0.repo=howland-releases \
             --publish never
 

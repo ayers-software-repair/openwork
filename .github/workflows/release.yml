@@ -70,9 +70,23 @@ jobs:
           # otherwise falls back to upstream's hardcoded default key in prod builds).
           VITE_OPENWORK_POSTHOG_KEY: ""
         run: |
+          # Stamp the app version from the release tag, NOT apps/desktop/package.json (still upstream's
+          # 0.17.20). Without this the packaged app reports the fork's upstream version in About and to
+          # the updater, so a machine on the 1.0.0 release would see itself as 0.17.20 and be offered a
+          # bogus "update" to what it already runs. extraMetadata overrides the version at pack time so
+          # electron-builder.yml / package.json stay untouched and upstream still merges. Version-locked
+          # to 1.0.0 until production is declared (mirrors Neptune's <Version>1.0.0</Version>); once a
+          # real tag drives it (howland-v1.2.3), that flows through here automatically.
+          VERSION=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-)?v?//')
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;   # a semver from the tag — use it
+            *) VERSION=1.0.0 ;;         # branch build / malformed tag — fall back to the locked version
+          esac
+          echo "Stamping Howland app version: $VERSION"
           pnpm --filter @openwork/desktop run build:electron
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.yml \
             -c.productName=Howland -c.appId=com.howland.app \
+            -c.extraMetadata.version="$VERSION" \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
             -c.mac.icon=resources/icons/howland-icon.png \
             -c.win.icon=resources/icons/howland-icon.png \

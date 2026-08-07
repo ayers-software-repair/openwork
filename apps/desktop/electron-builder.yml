@@ -39,8 +39,8 @@ afterSign: scripts/electron-after-sign.cjs
 # release assets during the migration window.
 publish:
   - provider: github
-    owner: different-ai
-    repo: openwork
+    owner: ayers-software-repair
+    repo: howland-releases
     releaseType: release
 mac:
   icon: resources/icons/icon.icns

@@ -33,10 +33,30 @@ const config: CapacitorConfig = {
   webDir: "dist",
   server: {
     androidScheme: "https",
-    // Howland servers are self hosted on the user's LAN or tailnet and speak plain http
-    // (http://10.x.x.x:8095 style). cleartext is therefore ALWAYS on, not only for a
-    // build-time server.url: the shipped app must be able to connect to whatever box the
-    // user owns. iOS gets the matching ATS exception in the release workflow.
+    // Howland servers are self-hosted on the user's LAN, tailnet, or reachable via mDNS
+    // (http://10.x.x.x:31052, http://100.x.y.z:31052, http://myhowland.local:31052 style), so
+    // the Android WebView needs cleartext enabled to even attempt an http:// load. This stays
+    // true unconditionally -- not only for a build-time server.url: the shipped app must be
+    // able to connect to whatever box the user owns. (Per Capacitor's docs this flag's effect
+    // is Android-specific, working around Android 9+'s default cleartext block; it does
+    // nothing on iOS, whose http gate is ATS, handled entirely via Info.plist -- see below.)
+    //
+    // This flag is NOT the security boundary and does not by itself decide which hosts
+    // cleartext is actually permitted to reach -- that scoping happens at the OS level,
+    // patched into the generated native projects by the release workflow AFTER `cap add`/
+    // `cap sync` (capacitor.config.ts runs before those native projects exist, so it cannot
+    // set OS-level network policy itself):
+    //   - Android: android/app/src/main/res/xml/network_security_config.xml, referenced via
+    //     android:networkSecurityConfig -- see mobile-release.yml step "Allow self-hosted
+    //     http servers (Android)".
+    //   - iOS: Info.plist NSAppTransportSecurity -> NSAllowsLocalNetworking (deliberately NOT
+    //     NSAllowsArbitraryLoads, the app-wide ATS kill switch App Store review flags) plus
+    //     NSLocalNetworkUsageDescription -- see mobile-release.yml steps "Allow self-hosted
+    //     http servers (iOS ATS)" and "Declare local network usage (iOS)".
+    // Leaving this `cleartext: true` does not widen those exceptions; it only lets the
+    // Android WebView issue the request in the first place, which the config above then
+    // allows or blocks. Do not "simplify" this back to a blanket everywhere-allowed comment --
+    // the actual scope is intentionally narrower and lives in the files listed above.
     cleartext: true,
     ...(serverUrl ? { url: serverUrl } : {}),
     ...(allowNavigation.length > 0 ? { allowNavigation } : {}),

@@ -88,19 +88,73 @@ jobs:
           if [ ! -d android ]; then npx cap add android; fi
           npx cap sync android
 
-      # Howland servers are self hosted and speak plain http on the user's LAN/tailnet, so the
-      # app must be allowed cleartext traffic. capacitor.config.ts sets cleartext, and this
-      # makes it explicit in the generated manifest regardless of Capacitor version behavior.
+      # Howland servers are self-hosted and speak plain http on the user's LAN or tailnet, so
+      # the app needs cleartext permitted for those destinations -- but scoped, not app-wide.
+      # This installs a network_security_config.xml (see its own header comment for exactly
+      # what it covers, and the one hard platform limitation: Android's config format has no
+      # CIDR/IP-range syntax, so it cannot express "any private IP" the way iOS's
+      # NSAllowsLocalNetworking can) and references it from the manifest instead of the old
+      # blanket android:usesCleartextTraffic="true" flag on <application>.
       - name: Allow self-hosted http servers (Android)
         working-directory: mobile
         run: |
           M=android/app/src/main/AndroidManifest.xml
+          XML_DIR=android/app/src/main/res/xml
+          mkdir -p "$XML_DIR"
+          cat > "$XML_DIR/network_security_config.xml" << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <!--
+            Howland servers are self-hosted: the phone app connects to whatever address the
+            user gives it - a LAN IP (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), a
+            Tailscale/tailnet IP (100.64.0.0/10 CGNAT), or an mDNS ".local" hostname - and
+            that box has no TLS certificate, so cleartext (http) has to be permitted for it.
+            This file replaces the old app-wide android:usesCleartextTraffic="true" manifest
+            flag so the exception is scoped and auditable instead of implicit.
+
+            PLATFORM LIMITATION - read this before "simplifying" the file back to a blanket
+            flag: Android's Network Security Configuration matches by exact hostname, or by
+            exact literal IP address, with optional DNS-style subdomain wildcarding
+            (includeSubdomains) - see
+            https://developer.android.com/privacy-and-security/security-config. There is NO
+            CIDR / IP range syntax. A <domain> entry of "10.0.0.0/8" or "100.64.0.0/10" is not
+            valid: this format cannot express "any address in this private range" the way
+            iOS's NSAllowsLocalNetworking does (that key is a runtime OS check, not a static
+            list). Since the user's server IP is chosen at connect time and can't be
+            enumerated at build time, it cannot be pre-declared here. This is a confirmed
+            platform gap, not an oversight (see mobile-release.yml for the writeup).
+
+            Given that limitation, this config is split in two:
+              1. mDNS ".local" names are proper DNS domains, so they narrow correctly below
+                 via includeSubdomains - this is real, functioning scoping.
+              2. Literal LAN/tailnet IPs typed in by the user can't be pre-declared, so
+                 cleartext is permitted at the base-config level, same as the old manifest
+                 flag did. Moving it into this file does NOT, by itself, shrink which hosts
+                 cleartext is allowed to - do not read its presence as having already solved
+                 that. If this ever needs tightening further, it has to happen in application
+                 code (validate the destination actually resolves to a private/tailnet address
+                 before allowing a plaintext request - see the isPrivateAddress() guard in
+                 ee/apps/den-api/src/capability-sources/url-guard.ts for the equivalent check
+                 already used server-side), not in this XML: the format cannot do it.
+          -->
+          <network-security-config>
+              <domain-config cleartextTrafficPermitted="true">
+                  <domain includeSubdomains="true">local</domain>
+              </domain-config>
+              <base-config cleartextTrafficPermitted="true" />
+          </network-security-config>
+          EOF
+          python3 -c "import xml.dom.minidom as m; m.parse('$XML_DIR/network_security_config.xml'); print('network_security_config.xml is well-formed XML')"
+
           # The generated manifest puts <application on its own line (attributes follow on the
           # next lines), so match the bare tag, not "<application ".
-          if ! grep -q 'usesCleartextTraffic' "$M"; then
-            sed -i 's/<application/<application android:usesCleartextTraffic="true"/' "$M"
+          if ! grep -q 'networkSecurityConfig' "$M"; then
+            sed -i 's/<application/<application android:networkSecurityConfig="@xml\/network_security_config"/' "$M"
           fi
-          grep -o 'usesCleartextTraffic="[^"]*"' "$M"
+          # Defensive: strip a bare usesCleartextTraffic="true" if anything (Capacitor itself,
+          # or a stray previous run) added it, so the app-wide flag and this scoped config file
+          # are never both in effect at once.
+          sed -i 's/ android:usesCleartextTraffic="true"//' "$M"
+          grep -o 'networkSecurityConfig="[^"]*"' "$M"
 
       # Signing gate. Secrets context is not reliably usable directly in step `if:`, so map the
       # keystore secret to env and derive a plain boolean output the later steps gate on.
@@ -207,18 +261,61 @@ jobs:
           if [ ! -d ios ]; then npx cap add ios; fi
           npx cap sync ios
 
-      # Same self-hosted reality on iOS: ATS blocks plain http by default, but the user's
-      # Howland box is http on their LAN or tailnet by design. Arbitrary loads with a clear
-      # justification is the established pattern for self-hosted server clients.
+      # Same self-hosted reality on iOS, but scoped narrowly rather than via the ATS kill
+      # switch -- see the step's inline comments for exactly what each key covers and why.
       - name: Allow self-hosted http servers (iOS ATS)
         working-directory: mobile
         run: |
           P=ios/App/App/Info.plist
+          # Howland servers are self-hosted on the user's LAN, tailnet, or reachable by an
+          # mDNS ".local" name, and speak plain http (no cert). Per Apple DTS
+          # (developer.apple.com/forums/thread/66417): "[NSAllowsLocalNetworking] has no
+          # effect on IP address loads (http://192.168.1.39/). On iOS 10 and later such loads
+          # are always allowed." -- so literal LAN IPs (10.x/172.16-31.x/192.168.x) and literal
+          # tailnet IPs (100.64.0.0/10) already work with NO ATS exception at all; ATS simply
+          # doesn't apply to numeric IP literals. What DOES need an exception is unqualified
+          # bare hostnames (http://myhowland/) and ".local" mDNS hostnames
+          # (http://myhowland.local/) -- that's exactly what NSAllowsLocalNetworking covers.
+          #
+          # Deliberately NOT NSAllowsArbitraryLoads: that key disables ATS for every host the
+          # app ever talks to, including the public internet, and is the specific blanket
+          # pattern App Store review flags and requires a (frequently rejected) written
+          # justification for. NSAllowsLocalNetworking covers this app's actual connection
+          # patterns (LAN IP, tailnet IP, .local) without that blast radius. Do not swap this
+          # back to NSAllowsArbitraryLoads to "simplify" it -- it would reopen that review risk
+          # for zero functional gain.
+          #
+          # NOT covered by NSAllowsLocalNetworking (nor by the IP exemption above): plain-http
+          # to a public FQDN (e.g. a dyndns hostname) or a Tailscale MagicDNS name
+          # (foo.tailnet-name.ts.net) -- both are real dotted hostnames, not "local" by ATS's
+          # definition, so ATS would still block them. Add an NSExceptionDomains entry here
+          # if/when such a pattern is actually supported.
           /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity' "$P" >/dev/null 2>&1 || \
             /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity dict' "$P"
-          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity:NSAllowsArbitraryLoads' "$P" >/dev/null 2>&1 || \
-            /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true' "$P"
+          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity:NSAllowsLocalNetworking' "$P" >/dev/null 2>&1 || \
+            /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true' "$P"
+          # Defensive: remove the blanket kill switch if anything (a previous run, a merge, a
+          # future "helpful" edit) left it in place, so the two are never both set at once.
+          /usr/libexec/PlistBuddy -c 'Delete :NSAppTransportSecurity:NSAllowsArbitraryLoads' "$P" >/dev/null 2>&1 || true
           /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity' "$P"
+
+      # Local Network Privacy is a SEPARATE iOS gate from ATS (see Apple TN3179): it controls
+      # whether the app can open a connection to a local-network destination at all (LAN IP or
+      # .local host -- Apple's Local Network Privacy FAQ excludes VPN-type interfaces from its
+      # definition of "local network", which is why this is believed to NOT gate Tailscale
+      # traffic, since Tailscale presents to iOS as a VPN/tunnel interface; not verified
+      # on-device). Without NSLocalNetworkUsageDescription present, iOS never shows the "Allow
+      # Howland to find and connect to devices on your local network?" permission prompt and
+      # the connection just fails (NSURLErrorNotConnectedToInternet -- a transport error, not
+      # the TLS error ATS misconfiguration produces). This key was entirely absent before, so
+      # LAN/.local connections would have failed regardless of the ATS settings above.
+      - name: Declare local network usage (iOS)
+        working-directory: mobile
+        run: |
+          P=ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$P" >/dev/null 2>&1 || \
+            /usr/libexec/PlistBuddy -c 'Add :NSLocalNetworkUsageDescription string "Howland connects to your self-hosted Howland server on your local network."' "$P"
+          /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$P"
 
       - name: Install CocoaPods dependencies
         working-directory: mobile/ios/App

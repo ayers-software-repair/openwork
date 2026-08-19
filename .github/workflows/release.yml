@@ -32,6 +32,12 @@ jobs:
             artifact: macos-intel
           - os: ubuntu-latest
             artifact: linux
+          # Linux arm64 (Raspberry Pi, arm64 servers/desktops). Native runner rather than a
+          # cross-build: electron-builder needs real per-architecture native modules, and
+          # prepare-sidecar.mjs resolves the sidecar from process.arch on the host. The sibling
+          # release-macos-aarch64.yml already builds this way on an arm runner.
+          - os: ubuntu-24.04-arm
+            artifact: linux-arm64
           - os: windows-latest
             artifact: windows
           - os: windows-11-arm
@@ -124,7 +130,17 @@ jobs:
       - name: Collect + rename installers to stable names
         run: |
           mkdir -p release
-          pick() { find artifacts -type f -name "$1" | head -1; }
+          # Exactly one match, or fail. `head -1` would silently publish an arbitrary file when a
+          # glob matches several — which is precisely how a wrong-architecture package ships under
+          # the right name, and nothing downstream would catch it.
+          pick() {
+            local found; found=$(find artifacts -type f -name "$1")
+            local n; n=$(printf '%s' "$found" | grep -c . || true)
+            if [ "$n" -ne 1 ]; then
+              echo "::error::glob '$1' matched $n files, expected exactly 1:"; echo "$found"; exit 1
+            fi
+            printf '%s' "$found"
+          }
           # Two mac architectures build now, so the globs are arch-specific (artifactName
           # renders howland-mac-arm64-* and howland-mac-x64-*).
           cp "$(pick '*mac-arm64*.dmg')"         release/Howland-macOS.dmg
@@ -135,10 +151,18 @@ jobs:
           cp "$(pick '*win-arm64*.exe')"         release/Howland-Windows-arm64.exe
           cp "$(pick '*linux-x86_64*.AppImage')" release/Howland-Linux.AppImage
           cp "$(pick '*linux-x64*.tar.gz')"      release/Howland-Linux.tar.gz
-          # deb: match the bare extension, not an arch token. ${arch} in artifactName is not
-          # stable across Linux targets (AppImage renders x86_64, tar.gz renders x64); exactly
-          # one .deb is produced by the single x64 Ubuntu leg, so the bare glob is unambiguous.
-          cp "$(pick '*.deb')"                   release/Howland-Linux.deb
+          # ${arch} in artifactName is not one token across Linux targets. From electron-builder's
+          # own getArtifactArchName(arch, ext) in builder-util:
+          #   AppImage  x64 -> x86_64   arm64 -> arm64
+          #   tar.gz    x64 -> x64      arm64 -> arm64
+          #   deb       x64 -> amd64    arm64 -> arm64
+          # The .deb glob used to be a bare '*.deb' on the grounds that only one Linux leg existed.
+          # Two do now, so it is arch-specific — a bare glob would have picked whichever the
+          # filesystem returned first and could have published an arm64 package under the x64 name.
+          cp "$(pick '*linux-amd64*.deb')"       release/Howland-Linux.deb
+          cp "$(pick '*linux-arm64*.AppImage')"  release/Howland-Linux-arm64.AppImage
+          cp "$(pick '*linux-arm64*.tar.gz')"    release/Howland-Linux-arm64.tar.gz
+          cp "$(pick '*linux-arm64*.deb')"       release/Howland-Linux-arm64.deb
           # Integrity: checksums published next to the binaries (sha256sum -c SHA256SUMS-desktop.txt).
           ( cd release && sha256sum Howland-* > SHA256SUMS-desktop.txt )
           echo "Stable-named installers:"; ls -la release

@@ -6,4 +6,4 @@ Cowork, artifacts, and code on your own hardware. Free and private.
 
 **Howland Desktop** is the app you work in. For Mac (Apple Silicon or Intel), Windows, and Linux.
 
-Something broken? Tell us: https://github.com/ayers-software-repair/howland-releases/issues
+Report an issue: https://github.com/ayers-software-repair/howland-releases/issues

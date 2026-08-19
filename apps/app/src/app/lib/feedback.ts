@@ -105,5 +105,36 @@ export function buildFeedbackUrl(options: FeedbackUrlOptions): string {
     }
   }
 
+  // Put the context into GitHub's own title/body parameters, not only into the query string.
+  // Everything gathered above used to ride along as bare query params, which GitHub's new-issue form
+  // ignores: the person filing saw an empty box, and every version and OS detail collected here was
+  // discarded at the exact moment it was wanted.
+  //
+  // The body also says what this is for. Google Play's AI-Generated Content policy expects an in-app
+  // way to report offensive or inappropriate model output, and this is that mechanism — so the
+  // template asks for it outright rather than leaving someone to guess the form covers it.
+  const context = Object.entries(entries)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `- ${key}: ${value}`)
+    .join("\n");
+
+  url.searchParams.set(
+    "body",
+    [
+      "<!-- If you are reporting something the model generated, paste it below. -->",
+      "",
+      "### What happened",
+      "",
+      "",
+      "### What you expected",
+      "",
+      "",
+      "### Details",
+      "",
+      context || "- (none collected)",
+      `- entrypoint: ${options.entrypoint}`,
+    ].join("\n"),
+  );
+
   return url.toString();
 }

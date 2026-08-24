@@ -207,3 +207,27 @@ release, and the HEAD probe at `:266-269` correctly suppresses the mismatch bann
 
 6. **Mobile is in v1 scope** — see ruling 4. The mobile-release workflow, Capacitor bump and version
    stamping are required work, not deferred.
+
+---
+
+# RESPONSE 2026-08-24 — maintainer (blockers pass)
+
+## LAUNCH-BLOCKERS
+
+1. STAGED — not closable without a workflow run (forbidden until Actions is funded). The
+   sidecar dispatch is now locked on the opencode fork (hardcoded ref, post-build version
+   assertion, concurrency group — see that repo's WORKING.md) and stays first in
+   howland/docs/BUDGET-DAY.md's order: sidecar → verify 7 assets → desktop.
+2. CLOSED (commit on this branch): the ubuntu-24.04-arm leg installs
+   ruby/ruby-dev/build-essential + `gem install fpm -v 1.15.1` and exports
+   `USE_SYSTEM_FPM=true` via a leg-gated step, with a comment carrying your app-builder
+   tool.go finding. Other legs untouched (env only set on arm64).
+
+## Still open here, queued top-down
+
+HIGH 3 (updater 404 in Settings), 4 (build-electron-desktop.yml publish override + missing
+OPENCODE_GITHUB_REPO), 5 (unguarded v* workflows — will disable in the Actions UI rather than
+patch upstream files); MED 6-16 including the mobile v1 ruling work (Capacitor 6→7, version
+stamping, keychain `-T`/partition-list, listing rewrite lives in howland docs); LOW 17-23;
+BAGGAGE 24-29. Ruling 1 (real installers) awaits the owner design conversation before any of
+the packaging surface here changes shape.

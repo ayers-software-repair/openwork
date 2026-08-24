@@ -26,11 +26,50 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to create/attach (e.g. howland-mobile-v0.17.20)'
+        description: 'Release tag to create/attach (e.g. howland-mobile-v1.0.0)'
         required: true
+      force_build:
+        description: 'Build even with no signing secrets (unsigned CI-proof run; publishes nothing)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
+  # Cheap gate (ubuntu, seconds). Without it both build jobs ran in full (~15-30 min each,
+  # one on macos-latest) on EVERY howland-v* tag even with zero signing secrets — only the
+  # publish skipped. The secrets context cannot appear in a job `if:` (parse-time failure),
+  # so this job derives plain booleans from the secrets (env-boolean pattern, as the howland
+  # repo's server-release.yml) and exposes them as outputs the build jobs gate on.
+  # force_build=true on manual dispatch still runs unsigned compile-proof builds on demand.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ANDROID_READY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+      IOS_READY: ${{ secrets.APPLE_CERT_P12_BASE64 != '' }}
+      FORCE_BUILD: ${{ github.event.inputs.force_build == 'true' }}
+    outputs:
+      android_build: ${{ steps.decide.outputs.android_build }}
+      ios_build: ${{ steps.decide.outputs.ios_build }}
+    steps:
+      - name: Decide which mobile legs run
+        id: decide
+        run: |
+          set -euo pipefail
+          android_build=false; ios_build=false
+          if [ "$ANDROID_READY" = "true" ] || [ "$FORCE_BUILD" = "true" ]; then android_build=true; fi
+          if [ "$IOS_READY" = "true" ] || [ "$FORCE_BUILD" = "true" ]; then ios_build=true; fi
+          {
+            echo "android_build=$android_build"
+            echo "ios_build=$ios_build"
+          } >> "$GITHUB_OUTPUT"
+          echo "android_build=$android_build ios_build=$ios_build"
+
   build-android:
+    needs: gate
+    if: ${{ needs.gate.outputs.android_build == 'true' }}
     runs-on: ubuntu-latest
     # Expose whether this leg produced a signed artifact, so the release job can skip cleanly
     # when nothing was signed (no artifacts to download/publish).
@@ -219,6 +258,8 @@ jobs:
           path: mobile-artifacts/*
 
   build-ios:
+    needs: gate
+    if: ${{ needs.gate.outputs.ios_build == 'true' }}
     runs-on: macos-latest
     # Expose whether this leg produced a signed IPA (see build-android note).
     outputs:
@@ -458,12 +499,17 @@ jobs:
           path: mobile-artifacts-ios/*
 
   release:
-    needs: [build-android, build-ios]
+    needs: [gate, build-android, build-ios]
     # Only run when at least one leg produced a signed artifact. `always()` lets this evaluate
-    # even if a build leg failed; the outputs gate means an all-unsigned run skips this job
-    # entirely (nothing to download or publish, no spurious failure).
+    # even if a build leg failed or was skipped by the gate (skipped legs have empty outputs),
+    # so an unsigned or fully gated-off run skips this job entirely (nothing to download or
+    # publish, no spurious failure).
     if: ${{ always() && (needs.build-android.outputs.signed == 'true' || needs.build-ios.outputs.signed == 'true') }}
     runs-on: ubuntu-latest
+    # Shared with release.yml's publish job — serializes publishes onto the one release train.
+    concurrency:
+      group: howland-releases-publish
+      cancel-in-progress: false
     steps:
       - name: Checkout (for RELEASE_NOTES.md)
         uses: actions/checkout@v4
@@ -487,9 +533,17 @@ jobs:
           echo "Mobile release assets:"; ls -la release || true
 
       # Clean product version from the tag (howland-mobile-v1.0.0 / howland-v1.0.0 -> 1.0.0).
+      # Same non-semver fallback as release.yml: a malformed dispatch input can never publish
+      # a howland-v<garbage> tag onto the release train.
       - name: Version
         id: v
-        run: echo "version=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-(mobile-)?)?v?//')" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-(mobile-)?)?v?//')
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) VERSION=1.0.0 ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       # Publish only if at least one signed artifact was produced. RELEASES_PAT = a token with
       # contents:write on ayers-software-repair/howland-releases.

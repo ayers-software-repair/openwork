@@ -349,3 +349,53 @@ artifacts before deleting either.
 **The one honest cost:** this fork rebases onto upstream. When upstream edits a workflow file we
 deleted, git raises a modify/delete conflict on that upgrade — one "stays deleted" decision per
 file, far cheaper than 20 live publish paths nobody is watching.
+
+---
+
+# RESPONSE 2026-08-24 — maintainer (full-sweep pass)
+
+All 29 findings closed or dispositioned. Commits: 2fa361016 (workflow surgery + ipa ruling),
+8080e8301 (identity/repair/mobile batch), plus the action-major bumps.
+
+- 1: STAGED (funding-gated dispatch; everything that made it unsafe is closed fork-side).
+- 2: closed earlier (system fpm, leg-gated).
+- 3: closed — HOWLAND_UPDATER_METADATA short-circuits to a clean no-update until latest*.yml
+  ships; comment tells the truth about the 404 it replaced.
+- 4: closed BY DELETION — build-electron-desktop.yml fired only on the dead
+  electron-notary-test branch and published nothing; release.yml is the shipping producer.
+- 5 + 30 + your delete-correction: 20 of 22 workflows deleted, both keepers carry
+  job-level github.repository guards; the stays-deleted-per-rebase cost is recorded in the
+  commit message.
+- 6/7: com.howland.app everywhere (runtime identifier + ShipIt domain + test fixture) —
+  matches release.yml's packed appId.
+- 8/25: the 512px -c.*.icon overrides are gone (the fork's 1024-ladder icns survives);
+  howland-icon.png deleted.
+- 9: -c.copyright (no-year, ADR 0001) + deb.maintainer=Ayers Electronics.
+- 10: one docs destination (releases README), Help menu and status bar agree.
+- 11: the guided repair now downloads the pinned FORK asset per platform — upstream's
+  install script cannot serve 1.17.11-howland, so the old command always failed.
+- 12/29: electron-builder.yml comments match reality.
+- 13/14 (ruling 4): Capacitor ^7 (cap add generates targetSdk 35+), real version stamping
+  on both platforms (display version from the tag, build number from run_number so store
+  codes increase while 1.0.0 rebuilds in place), unsigned iOS gets the same bundle id.
+- 15/16/22: gone with the deletion sweep.
+- 17: dispatch tags env-routed in all three Version steps.
+- 18: strict single-match collection (refuses ambiguity instead of head -1).
+- 19: keychain import -T /usr/bin/codesign + set-key-partition-list — headless xcodebuild
+  no longer hits a UI prompt.
+- 20: signtool discovery throws a named error when the Kits layout changes.
+- 21: timeout-minutes on every build leg and the release jobs.
+- 23: digits-only guard ahead of the semver case in all three stamps.
+- 24: the six-function dead download-manifest chain deleted.
+- 26: DOES NOT HOLD — HOWLAND_DEFAULT_PORTS.brain is read via the spread at main.mjs:965;
+  no change.
+- 27: the swap-point comment names the private build-farm repo path explicitly.
+- 28: resolved as generated-at-CI BY DESIGN: package-lock.json committed, both legs npm ci,
+  gitignore/README rewritten to the decision instead of contradicting it.
+- Also: action majors bumped per ruling 5 (checkout v7, artifacts v7/v8, softprops v3 —
+  changelog read; Node-24 runtime, same-tag replacement retained).
+
+Deferred, with reasons: publishing latest*.yml updater metadata (a release-train design
+change — needs the owner's word on desktop auto-update for 1.0); mac.binaries for the
+sidecars in electron-builder.yml (required BEFORE notarization is enabled, inert and
+untestable while unsigned — recorded in the fork's workflow header and READINESS).

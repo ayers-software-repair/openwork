@@ -1,6 +1,6 @@
 name: Release Howland Desktop
 
-# Tag-driven release: pushing a howland-v* (or v*) tag builds every desktop OS and
+# Tag-driven release: pushing a howland-v* tag builds every desktop OS and
 # publishes one GitHub Release carrying the Howland-branded installers. Same build
 # steps as build-electron-desktop.yml; branding is build-time only so electron-builder.yml
 # stays untouched and upstream still merges. Signing is intentionally absent (unsigned now);
@@ -10,12 +10,15 @@ on:
   push:
     tags:
       - 'howland-v*'
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to create/attach (e.g. howland-v0.17.20)'
+        description: 'Release tag to create/attach (e.g. howland-v1.0.0)'
         required: true
+
+# The GITHUB_TOKEN only checks out this repo; publishing goes through RELEASES_PAT.
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -44,6 +47,15 @@ jobs:
             artifact: windows-arm64
     runs-on: ${{ matrix.os }}
 
+    # Soft-fail signing gates. The secrets context is NOT allowed in an `if:` (it fails the
+    # whole run at parse time), so derive plain booleans here and gate steps on env — the
+    # same pattern as the howland repo's server-release.yml. Secrets absent => every signing
+    # step skips => byte-for-byte today's unsigned build.
+    env:
+      MAC_SIGN: ${{ secrets.APPLE_DESKTOP_CERT_P12_BASE64 != '' }}
+      MAC_NOTARIZE: ${{ secrets.APPLE_DESKTOP_CERT_P12_BASE64 != '' && secrets.APPLE_NOTARY_KEY_P8 != '' }}
+      WIN_SIGN: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,6 +78,50 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # --- macOS signing (soft-fail) --------------------------------------------------------
+      # electron-builder reads CSC_LINK / CSC_KEY_PASSWORD straight from the environment, and
+      # an EMPTY CSC_LINK is NOT treated as unset: app-builder-lib keeps "" (getCscLink uses
+      # chooseNotNull) and only skips signing on null, so an empty string reaches
+      # createKeychain -> `security import` of a zero-byte p12 -> hard failure. So these vars
+      # are exported HERE, inside a gated step, never at job level from possibly-empty
+      # secrets. Heredoc form guards against line-wrapped base64 values.
+      - name: Enable macOS code signing (when cert secret present)
+        if: ${{ runner.os == 'macOS' && env.MAC_SIGN == 'true' }}
+        env:
+          P12_B64: ${{ secrets.APPLE_DESKTOP_CERT_P12_BASE64 }}
+          P12_PASS: ${{ secrets.APPLE_DESKTOP_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          {
+            echo "CSC_LINK<<__HOWLAND_EOF__";         echo "$P12_B64";  echo "__HOWLAND_EOF__"
+            echo "CSC_KEY_PASSWORD<<__HOWLAND_EOF__"; echo "$P12_PASS"; echo "__HOWLAND_EOF__"
+          } >> "$GITHUB_ENV"
+          echo "macOS signing enabled (Developer ID Application cert via CSC_LINK)."
+
+      # The after-sign hook (apps/desktop/scripts/electron-after-sign.cjs) notarizes only when
+      # MACOS_NOTARIZE=true and needs APPLE_API_KEY_PATH (.p8 on disk), APPLE_API_KEY (key id)
+      # and APPLE_API_ISSUER — the exact env set upstream's release-macos-aarch64.yml feeds
+      # the same hook. Secret names reuse the howland repo's server-release.yml notary scheme
+      # so ONE App Store Connect key is stored under the SAME names in both repos.
+      - name: Enable macOS notarization (when notary key present)
+        if: ${{ runner.os == 'macOS' && env.MAC_NOTARIZE == 'true' }}
+        env:
+          NOTARY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          KEY="$RUNNER_TEMP/howland-notary.p8"
+          printf '%s' "$NOTARY_P8" | base64 --decode > "$KEY"
+          chmod 600 "$KEY"
+          {
+            echo "MACOS_NOTARIZE=true"
+            echo "APPLE_API_KEY_PATH=$KEY"
+            echo "APPLE_API_KEY=$NOTARY_KEY_ID"
+            echo "APPLE_API_ISSUER=$NOTARY_ISSUER"
+          } >> "$GITHUB_ENV"
+          echo "macOS notarization enabled (notarytool API key)."
+
       # Main package step. On Ubuntu this builds AppImage + tar.gz + deb (deb comes from the
       # electron-builder.yml linux.target list — see the comment there for why deb can't be
       # added purely via a `-c` override). Branding stays build-time-only via `-c`.
@@ -75,6 +131,12 @@ jobs:
           # Kill upstream analytics: an empty key disables PostHog in any build (the resolver
           # otherwise falls back to upstream's hardcoded default key in prod builds).
           VITE_OPENWORK_POSTHOG_KEY: ""
+          # The sidecar comes from the Howland-branded opencode fork, not upstream: the fork's
+          # release v1.17.11-howland (upstream v1.17.11 + Howland TUI theme) carries the same
+          # six asset names prepare-sidecar.mjs resolves. That release MUST exist before this
+          # workflow runs — the sidecar fetch exits 1 on a missing asset and one dead leg
+          # blocks the whole desktop release (see the fork's howland-sidecar.yml).
+          OPENCODE_GITHUB_REPO: ayers-software-repair/opencode
         run: |
           # Stamp the app version from the release tag, NOT apps/desktop/package.json (still upstream's
           # 0.17.20). Without this the packaged app reports the fork's upstream version in About and to
@@ -101,6 +163,37 @@ jobs:
             -c.linux.description="Howland - private, offline, self-hosted AI and survival library" \
             --publish never
 
+      # --- Windows Authenticode (soft-fail, isolated + swappable) ---------------------------
+      # Signs the final NSIS installer with signtool — same mechanism, secret names and
+      # env-boolean gate as the howland repo's server-release.yml "Sign the .exe" step. Runs
+      # on both windows legs; skips cleanly when WINDOWS_CERT_PFX_BASE64 is absent.
+      #
+      # >>> SWAP POINT (Azure Trusted Signing) <<<
+      # File-based PFX certs are no longer purchasable (build-farm/signing/READINESS.md); when
+      # Azure Trusted Signing is provisioned, replace ONLY this step with
+      # azure/trusted-signing-action (files-folder: apps/desktop/dist-electron, filter *.exe)
+      # and redefine WIN_SIGN at the job level to test the Azure secrets instead
+      # (e.g. secrets.AZURE_TENANT_ID != ''). Nothing else moves: SHA256SUMS-desktop.txt is
+      # computed in the release job AFTER this, so checksums always cover the signed bytes.
+      - name: Sign the Windows installer (Authenticode)
+        if: ${{ runner.os == 'Windows' && env.WIN_SIGN == 'true' }}
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          PFX_PWD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "howland-codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          $archDir = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+          $signtool = (Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match $archDir } | Select-Object -First 1).FullName
+          foreach ($exe in (Get-ChildItem "apps/desktop/dist-electron" -Filter *.exe)) {
+            & $signtool sign /f $pfx /p $env:PFX_PWD /fd SHA256 `
+              /tr http://timestamp.digicert.com /td SHA256 /d "Howland" $exe.FullName
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed for $($exe.Name)" }
+          }
+          Remove-Item $pfx
+
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
@@ -116,6 +209,14 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    # ONE RELEASE TRAIN guard: this workflow and mobile-release.yml both fire on howland-v*
+    # tags and publish onto the SAME howland-releases release. A shared job-level group
+    # serializes just the publish jobs (not the builds) so softprops never races itself
+    # creating/updating the release. Constant name on purpose: publishes are quick, the
+    # version is locked at 1.0.0, and job-level concurrency can't see step-computed tags.
+    concurrency:
+      group: howland-releases-publish
+      cancel-in-progress: false
     steps:
       - name: Checkout (for RELEASE_NOTES.md)
         uses: actions/checkout@v4
@@ -167,10 +268,19 @@ jobs:
           ( cd release && sha256sum Howland-* > SHA256SUMS-desktop.txt )
           echo "Stable-named installers:"; ls -la release
 
-      # Clean product version from the tag (howland-v1.0.0 -> 1.0.0).
+      # Clean product version from the tag (howland-v1.0.0 -> 1.0.0), normalized EXACTLY like
+      # the build job's stamp: a non-semver value (branch dispatch, malformed tag) falls back
+      # to the locked 1.0.0, so tag_name below can never mint a stray public tag and the
+      # published tag always matches the version stamped into the binaries.
       - name: Version
         id: v
-        run: echo "version=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-)?v?//')" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-)?v?//')
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;   # a semver from the tag — use it
+            *) VERSION=1.0.0 ;;         # branch build / malformed tag — the locked version
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       # Publish to the PUBLIC howland-releases repo (the public download + issues home). PUBLIC so the site
       # links to /releases/latest/download/<StableName>, always current, zero redeploy. RELEASES_PAT = a
@@ -181,7 +291,10 @@ jobs:
         with:
           repository: ayers-software-repair/howland-releases
           token: ${{ secrets.RELEASES_PAT }}
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          # Normalized, never the raw ref: a v* or malformed tag/dispatch input must not mint
+          # a second release tag on howland-releases — that would become "latest" and 404
+          # every family's /releases/latest/download/<name> link (ONE RELEASE TRAIN).
+          tag_name: howland-v${{ steps.v.outputs.version }}
           # All families (desktop, mobile, server) share ONE release per version; the title is the
           # plain product+version so whichever workflow publishes last leaves the same name.
           name: Howland ${{ steps.v.outputs.version }}

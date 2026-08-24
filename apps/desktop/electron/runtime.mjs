@@ -1011,7 +1011,25 @@ export function createRuntimeManager({ app, desktopRoot, listLocalWorkspacePaths
     if (!version) {
       throw new Error("constants.json is missing opencodeVersion");
     }
-    return `curl -fsSL https://opencode.ai/install | bash -s -- --version ${version} --no-modify-path`;
+    // The pin is a HOWLAND fork release (e.g. 1.17.11-howland); upstream's opencode.ai/install
+    // only serves upstream versions, so the old curl always failed. Fetch the platform asset
+    // from the fork directly — the asset map mirrors prepare-sidecar.mjs opencodeAssetByTarget.
+    return [
+      `set -eu`,
+      `V=${version}`,
+      `case "$(uname -s)-$(uname -m)" in`,
+      `  Darwin-arm64) A=opencode-darwin-arm64.zip ;;`,
+      `  Darwin-*) A=opencode-darwin-x64-baseline.zip ;;`,
+      `  Linux-aarch64|Linux-arm64) A=opencode-linux-arm64.tar.gz ;;`,
+      `  *) A=opencode-linux-x64-baseline.tar.gz ;;`,
+      `esac`,
+      `D=$(mktemp -d); cd "$D"`,
+      `curl -fsSL -o pkg "https://github.com/ayers-software-repair/opencode/releases/download/v$V/$A"`,
+      `case "$A" in *.zip) unzip -q pkg ;; *) tar -xzf pkg ;; esac`,
+      `mkdir -p "$OPENCODE_INSTALL_DIR"`,
+      `install -m 0755 opencode "$OPENCODE_INSTALL_DIR/opencode"`,
+      `"$OPENCODE_INSTALL_DIR/opencode" --version`,
+    ].join("\n");
   }
 
   function spawnManagedChild(state, program, args, options = {}) {

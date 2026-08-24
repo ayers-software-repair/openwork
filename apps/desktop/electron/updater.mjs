@@ -31,8 +31,12 @@ function resolveAppVersion(app) {
 }
 // Howland: the update feed points at HOWLAND's releases, never upstream OpenWork — the upstream
 // feed would offer stock OpenWork as an "update" and overwrite this build. Howland releases carry
-// no electron-updater metadata yet (stable asset names, one release train), so update checks
-// resolve to no-update until versioned updater metadata ships; they can never pull upstream.
+// no electron-updater metadata (stable asset names, one release train, no latest*.yml uploaded),
+// so checkForUpdates would GET latest-mac.yml, receive a 404, and surface the RAW HTTP ERROR in
+// Settings -> Updates on every packaged launch. HOWLAND_UPDATER_METADATA below is the one switch:
+// it stays false until the release train actually publishes updater metadata, and while false the
+// check short-circuits to a clean no-update. It can never pull upstream either way.
+const HOWLAND_UPDATER_METADATA = false; // flip when latest*.yml ships on the release train
 const ELECTRON_UPDATER_FEEDS = Object.freeze({
   stable: "https://github.com/ayers-software-repair/howland-releases/releases/latest/download",
   alpha: "https://github.com/ayers-software-repair/howland-releases/releases/latest/download",
@@ -180,7 +184,10 @@ function runDefaults(args) {
 
 // Squirrel.Mac's `ShipIt` helper (which swaps the .app on macOS) reads its
 // options from this NSUserDefaults domain.
-const SHIP_IT_DEFAULTS_DOMAIN = "com.differentai.openwork.ShipIt";
+// Squirrel.Mac derives this domain from the BUNDLE id, and Howland packs
+// -c.appId=com.howland.app (release.yml) - the old upstream literal wrote and cleaned a
+// domain no shipped bundle ever used.
+const SHIP_IT_DEFAULTS_DOMAIN = "com.howland.app.ShipIt";
 
 // Squirrel.Mac defaults to moving the *entire* app bundle through a temp
 // directory. On repeat installs that move can leave the staged bundle missing,
@@ -301,6 +308,11 @@ export function registerUpdaterIpc({ app, ipcMain, getMainWindow }) {
       ? await applyElectronUpdaterFeed(app, updater)
       : updaterChannelState(app, await readElectronUpdaterChannel(app));
     if (!updater) return { available: false, reason: "unavailable", ...channelState };
+    if (!HOWLAND_UPDATER_METADATA) {
+      // Clean no-update, not a fetch that must 404 (see HOWLAND_UPDATER_METADATA above).
+      checkedUpdateVersion = null;
+      return { available: false, currentVersion: resolveAppVersion(app), latestVersion: null, releaseDate: null, releaseNotes: null, ...channelState };
+    }
     try {
       const result = await updater.checkForUpdates();
       const info = result?.updateInfo ?? null;

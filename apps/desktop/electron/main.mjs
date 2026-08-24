@@ -49,6 +49,10 @@ const require = createRequire(import.meta.url);
 const pty = require(["node", "pty"].join("-"));
 const NATIVE_DEEP_LINK_EVENT = "openwork:deep-link-native";
 const TAURI_APP_IDENTIFIER = "com.differentai.openwork";
+// Howland packs with -c.appId=com.howland.app (release.yml); the runtime identifier must
+// match or NSIS stamps shortcuts with one AppUserModelID while setAppUserModelId claims
+// another - Windows taskbar pinning, grouping and toasts all break on the mismatch.
+const HOWLAND_APP_IDENTIFIER = "com.howland.app";
 const DEV_APP_IDENTIFIER = "com.differentai.openwork.dev";
 const DESKTOP_PROTOCOL_SCHEME = "openwork";
 const isDevMode = process.env.OPENWORK_DEV_MODE === "1";
@@ -58,10 +62,11 @@ const APP_NAME =
 let currentDisplayAppName = APP_NAME;
 const APP_IDENTIFIER =
   process.env.OPENWORK_ELECTRON_APP_IDENTIFIER?.trim() ||
-  (isDevMode ? DEV_APP_IDENTIFIER : TAURI_APP_IDENTIFIER);
+  (isDevMode ? DEV_APP_IDENTIFIER : HOWLAND_APP_IDENTIFIER);
 const RELEASE_DOWNLOAD_BASE_URL = "https://github.com/ayers-software-repair/howland-releases/releases/latest/download";
 const RELEASE_PAGE_URL = "https://github.com/ayers-software-repair/howland-releases/releases/latest";
-const DOCS_PAGE_URL = "https://openworklabs.com/docs";
+// One docs destination everywhere: the status bar already points at the releases README.
+const DOCS_PAGE_URL = "https://github.com/ayers-software-repair/howland-releases#readme";
 // Howland: Help -> Report a Problem opens the public issue tracker (the howland-releases repo).
 const REPORT_ISSUE_URL = "https://github.com/ayers-software-repair/howland-releases/issues/new";
 const applicationMenu = createApplicationMenu({
@@ -189,28 +194,9 @@ function resolveSystemArch() {
   return normalizeRuntimeArch(os.arch());
 }
 
-function platformDownloadSlug() {
-  if (process.platform === "darwin") return "mac";
-  if (process.platform === "win32") return "win";
-  return "linux";
-}
 
-function downloadAssetArch(arch) {
-  if (process.platform === "linux" && arch === "x64") return "x86_64";
-  return arch;
-}
 
-function downloadAssetExtension() {
-  if (process.platform === "darwin") return "dmg";
-  if (process.platform === "win32") return "exe";
-  return "AppImage";
-}
 
-function updaterManifestName(arch) {
-  if (process.platform === "darwin") return "latest-mac.yml";
-  if (process.platform === "win32") return "latest.yml";
-  return arch === "arm64" ? "latest-linux-arm64.yml" : "latest-linux.yml";
-}
 
 function archLabel(arch) {
   if (arch === "arm64") return "ARM";
@@ -218,36 +204,7 @@ function archLabel(arch) {
   return arch;
 }
 
-function parseUpdaterManifestFiles(raw) {
-  const files = [];
-  let current = null;
-  for (const line of String(raw || "").split(/\r?\n/)) {
-    const start = line.match(/^\s*-\s+url:\s*(.+?)\s*$/);
-    if (start) {
-      current = { url: start[1].trim().replace(/^['"]|['"]$/g, "") };
-      files.push(current);
-      continue;
-    }
-    const prop = line.match(/^\s{4}([A-Za-z][A-Za-z0-9_-]*):\s*(.+?)\s*$/);
-    if (prop && current) {
-      current[prop[1]] = prop[2].trim().replace(/^['"]|['"]$/g, "");
-    }
-  }
-  return files.filter((file) => file.url);
-}
 
-function selectDownloadFile(files, arch) {
-  const assetArch = downloadAssetArch(arch);
-  const expected = `-${assetArch}-`;
-  const extension = downloadAssetExtension();
-  const matchingArch = files.filter((file) => file.url.includes(expected));
-  return (
-    matchingArch.find((file) => file.url.endsWith(`.${extension}`)) ||
-    matchingArch.find((file) => file.url.endsWith(".zip")) ||
-    matchingArch[0] ||
-    null
-  );
-}
 
 function howlandAssetName(arch) {
   if (process.platform === "darwin") return arch === "arm64" ? "Howland-macOS.dmg" : "Howland-macOS-Intel.dmg";

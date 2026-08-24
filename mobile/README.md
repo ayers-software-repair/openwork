@@ -49,7 +49,9 @@ npx cap open ios       # Xcode
 npx cap open android   # Android Studio
 ```
 
-For production, commit the generated `android/` and `ios/` folders (remove them from
+The generated `android/` and `ios/` folders stay UNcommitted by design (see .gitignore);
+the workflow stamps versioning/identity after generation and package-lock.json pins the
+inputs. (The old guidance said to commit them — superseded 2026-08-24.) Ignore: (remove them from
 `.gitignore`) so you control signing, versioning, icons, and native config, then update the
 release workflow's "add platform" step (it only runs `cap add` when the folder is missing).
 

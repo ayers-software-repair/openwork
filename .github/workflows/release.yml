@@ -50,6 +50,8 @@ jobs:
           - os: windows-11-arm
             artifact: windows-arm64
     runs-on: ${{ matrix.os }}
+    # A hung leg would otherwise burn the 360-minute default; notarization can add 5-20 min.
+    timeout-minutes: 60
 
     # Soft-fail signing gates. The secrets context is NOT allowed in an `if:` (it fails the
     # whole run at parse time), so derive plain booleans here and gate steps on env — the
@@ -166,6 +168,7 @@ jobs:
           # real tag drives it (howland-v1.2.3), that flows through here automatically.
           VERSION=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-)?v?//')
           case "$VERSION" in
+            *[!0-9.]*) VERSION=1.0.0 ;;   # any non-digit/dot means not a version
             [0-9]*.[0-9]*.[0-9]*) ;;   # a semver from the tag — use it
             *) VERSION=1.0.0 ;;         # branch build / malformed tag — fall back to the locked version
           esac
@@ -175,10 +178,9 @@ jobs:
             -c.productName=Howland -c.appId=com.howland.app \
             -c.extraMetadata.version="$VERSION" \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
-            -c.mac.icon=resources/icons/howland-icon.png \
-            -c.win.icon=resources/icons/howland-icon.png \
-            -c.linux.icon=resources/icons/howland-icon.png \
             -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
+            -c.copyright="Copyright Ayers Electronics Inc. All rights reserved." \
+            '-c.deb.maintainer=Ayers Electronics' \
             -c.linux.description="Howland - private, offline, self-hosted AI and survival library" \
             --publish never
 
@@ -188,7 +190,8 @@ jobs:
       # on both windows legs; skips cleanly when WINDOWS_CERT_PFX_BASE64 is absent.
       #
       # >>> SWAP POINT (Azure Trusted Signing) <<<
-      # File-based PFX certs are no longer purchasable (build-farm/signing/READINESS.md); when
+      # File-based PFX certs are no longer purchasable (see the private build-farm repo,
+      # signing/READINESS.md); when
       # Azure Trusted Signing is provisioned, replace ONLY this step with
       # azure/trusted-signing-action (files-folder: apps/desktop/dist-electron, filter *.exe)
       # and redefine WIN_SIGN at the job level to test the Azure secrets instead
@@ -206,6 +209,7 @@ jobs:
           $archDir = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
           $signtool = (Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin" -Recurse -Filter signtool.exe |
             Where-Object { $_.FullName -match $archDir } | Select-Object -First 1).FullName
+          if (-not $signtool) { throw "signtool.exe for $archDir not found under Windows Kits - the runner image changed" }
           foreach ($exe in (Get-ChildItem "apps/desktop/dist-electron" -Filter *.exe)) {
             & $signtool sign /f $pfx /p $env:PFX_PWD /fd SHA256 `
               /tr http://timestamp.digicert.com /td SHA256 /d "Howland" $exe.FullName
@@ -229,6 +233,7 @@ jobs:
     needs: build
     if: github.repository == 'ayers-software-repair/openwork'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # ONE RELEASE TRAIN guard: this workflow and mobile-release.yml both fire on howland-v*
     # tags and publish onto the SAME howland-releases release. A shared job-level group
     # serializes just the publish jobs (not the builds) so softprops never races itself
@@ -294,9 +299,12 @@ jobs:
       # published tag always matches the version stamped into the binaries.
       - name: Version
         id: v
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          VERSION=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-)?v?//')
+          VERSION=$(echo "$RAW_TAG" | sed -E 's/^(howland-)?v?//')
           case "$VERSION" in
+            *[!0-9.]*) VERSION=1.0.0 ;;   # any non-digit/dot means not a version
             [0-9]*.[0-9]*.[0-9]*) ;;   # a semver from the tag — use it
             *) VERSION=1.0.0 ;;         # branch build / malformed tag — the locked version
           esac

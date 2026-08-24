@@ -64,7 +64,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -218,7 +218,7 @@ jobs:
           Remove-Item $pfx
 
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: howland-${{ matrix.artifact }}
           path: |
@@ -244,10 +244,10 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout (for RELEASE_NOTES.md)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download all installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -315,7 +315,7 @@ jobs:
       # token with contents:write on ayers-software-repair/howland-releases, set as a secret on this fork.
       # Notes come from RELEASE_NOTES.md in this repo; edit that file per version to tune the release notes.
       - name: Publish to the public releases repo
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: ayers-software-repair/howland-releases
           token: ${{ secrets.RELEASES_PAT }}

@@ -1,6 +1,6 @@
 ## Howland 1.0.0
 
-Cowork, artifacts, and code on your own hardware. Free and private.
+Chat, artifacts, and code on your own hardware. Free and private.
 
 **Howland Server** runs your models and your library. For Mac, Windows, and Linux.
 

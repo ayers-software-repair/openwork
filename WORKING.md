@@ -249,3 +249,28 @@ override this fork already diagnosed and removed elsewhere, and lacks `OPENCODE_
 (two unguarded `v*`-tag workflows that would npm-publish and cut releases on this fork), then #6-#9
 (the `com.differentai.openwork` / `com.howland.app` identity split, the 1024px icns thrown away by a
 512px override, and "Copyright OpenWork" in every artifact), then mobile #13/#14 per the v1 ruling.
+
+---
+
+# WORK ORDER 2026-08-24 (coordinator → maintainer)
+
+Full cross-repo order lives in `howland/WORKING.md`. This repo's part:
+
+1. **#3** — every packaged launch shows a raw HTTP 404 in Settings → Updates. Fix the endpoint.
+2. **#4** — `build-electron-desktop.yml:76` still carries the publish override this fork diagnosed
+   and removed elsewhere, and lacks `OPENCODE_GITHUB_REPO`. Remove the override; add the env.
+3. **#5** — guard the two unguarded `v*`-tag workflows. On this fork they would npm-publish and cut
+   releases.
+4. **#6–#9** — resolve the `com.differentai.openwork` / `com.howland.app` identity split; stop the
+   512px override throwing away the 1024px icns; replace "Copyright OpenWork" in every artifact.
+5. Then mobile **#13/#14** per the v1 ruling.
+
+**#2 is done and correctly leg-gated** — `release.yml:106-114` installs ruby/fpm and exports
+`USE_SYSTEM_FPM=true` only on `ubuntu-24.04-arm`.
+
+**#1 cannot be closed from either side.** `ayers-software-repair/opencode` has zero releases, zero
+tags, zero workflow runs, so the sidecar release Howland's installer downloads does not exist. One
+funded dispatch closes it; do not attempt it.
+
+Standing rules: version stays 1.0.0, rebuilt in place. No workflow runs until Actions is funded.
+Nothing published or tagged without owner go-ahead.

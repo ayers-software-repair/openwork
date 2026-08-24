@@ -249,18 +249,21 @@ function selectDownloadFile(files, arch) {
   );
 }
 
+function howlandAssetName(arch) {
+  if (process.platform === "darwin") return arch === "arm64" ? "Howland-macOS.dmg" : "Howland-macOS-Intel.dmg";
+  if (process.platform === "win32") return arch === "arm64" ? "Howland-Windows-arm64.exe" : "Howland-Windows.exe";
+  return arch === "arm64" ? "Howland-Linux-arm64.AppImage" : "Howland-Linux.AppImage";
+}
+
 async function resolveCorrectArchitectureDownloadUrl(arch) {
-  const manifestUrl = `${RELEASE_DOWNLOAD_BASE_URL}/${updaterManifestName(arch)}`;
+  // Howland releases carry STABLE version-free asset names and publish no electron-updater
+  // latest-*.yml manifests, so the right-architecture download is a fixed URL. Upstream's
+  // manifest resolution (above) would 404 forever and silently disable the mismatch banner;
+  // instead confirm the stable asset exists so the banner never offers a dead link.
+  const url = `${RELEASE_DOWNLOAD_BASE_URL}/${howlandAssetName(arch)}`;
   try {
-    const response = await fetch(manifestUrl, {
-      headers: { Accept: "text/yaml, text/plain, */*" },
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const selected = selectDownloadFile(parseUpdaterManifestFiles(await response.text()), arch);
-    if (!selected?.url) return null;
-    return /^https?:\/\//i.test(selected.url)
-      ? selected.url
-      : new URL(selected.url, `${RELEASE_DOWNLOAD_BASE_URL}/`).toString();
+    const response = await fetch(url, { method: "HEAD", redirect: "follow" });
+    return response.ok ? url : null;
   } catch (error) {
     console.warn("[architecture] failed to resolve latest download URL", error);
     return null;
@@ -272,7 +275,6 @@ async function resolveArchitectureInfo() {
   const systemArch = resolveSystemArch();
   const version = app.getVersion();
   const targetArch = systemArch === "arm64" || systemArch === "x64" ? systemArch : appArch;
-  const assetName = `openwork-${platformDownloadSlug()}-${downloadAssetArch(targetArch)}-${version}.${downloadAssetExtension()}`;
   const latestDownloadUrl = await resolveCorrectArchitectureDownloadUrl(targetArch);
   const hasCorrectArchitectureDownload = Boolean(latestDownloadUrl);
   return {
@@ -283,7 +285,7 @@ async function resolveArchitectureInfo() {
     mismatch: appArch !== systemArch && hasCorrectArchitectureDownload,
     platform: process.platform === "win32" ? "windows" : process.platform,
     version,
-    downloadUrl: latestDownloadUrl || `${RELEASE_DOWNLOAD_BASE_URL}/${assetName}`,
+    downloadUrl: latestDownloadUrl || `${RELEASE_DOWNLOAD_BASE_URL}/${howlandAssetName(targetArch)}`,
     releaseUrl: RELEASE_PAGE_URL,
   };
 }

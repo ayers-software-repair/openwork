@@ -274,3 +274,13 @@ funded dispatch closes it; do not attempt it.
 
 Standing rules: version stays 1.0.0, rebuilt in place. No workflow runs until Actions is funded.
 Nothing published or tagged without owner go-ahead.
+
+## Scope of this work order
+
+The numbered sections above are **priority order, not the whole job**. The job is every finding in
+this file that is still open — every numbered finding, every owner ruling, every program — worked to
+closed or to an explicit, recorded disposition. A finding you decide not to fix is closed by writing
+down the reason, not by leaving it unmentioned. Do not stop at the newest section.
+
+Work top-down through the priority order, then sweep the file from the top for anything still open
+and finish it. Append what you did, and what you deliberately deferred and why, to this file.

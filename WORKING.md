@@ -315,3 +315,37 @@ v1, and each one is a live publish path nobody is watching.
 
 Do this **before** Actions is funded, not after. Once funded, an unguarded scheduled workflow does
 not wait for anyone's approval.
+
+## Correction to the finding above — the answer is delete, and the number is 20 of 22
+
+Traced the actual dependency chain rather than assuming every workflow had a reason to exist:
+
+```
+opencode/howland-sidecar.yml  →  release v1.17.11-howland
+        ↓  (this repo: constants.json "opencodeVersion", release.yml OPENCODE_GITHUB_REPO)
+openwork/release.yml          →  13 desktop assets on howland-releases
+        ↓  (howland/installer/release_assets_test.go binds the exact names)
+howland                       →  site links, tray updater, bundle command
+```
+
+**Two workflows here are load-bearing:** `release.yml` (the 13 desktop assets the Howland install
+path and `release_assets_test.go` are bound to) and `mobile-release.yml` (gated on signing keys;
+`howland/installer/release_assets_test.go` already lists `Howland-iOS.ipa`,
+`Howland-Android.apk`, `Howland-Android.aab` as *planned* — the site links them today and they do
+not exist).
+
+The other 20 are upstream's CI for upstream's project — enterprise container images, Daytona,
+Den, AUR validation, nightly evals, and the generic-installer release train. They are not
+"unguarded", they are **not ours**.
+
+**Delete 20, keep `release.yml` and `mobile-release.yml`, and guard both** with
+`if: github.repository == 'ayers-software-repair/openwork'`.
+
+Note `build-electron-desktop.yml` is on that delete list — finding `#4` asked for the publish
+override to be removed from it and `OPENCODE_GITHUB_REPO` added. **If that workflow is dead, `#4`
+closes by deleting the file instead.** Confirm which of the two produces the shipped desktop
+artifacts before deleting either.
+
+**The one honest cost:** this fork rebases onto upstream. When upstream edits a workflow file we
+deleted, git raises a modify/delete conflict on that upgrade — one "stays deleted" decision per
+file, far cheaper than 20 live publish paths nobody is watching.

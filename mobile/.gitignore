@@ -1,8 +1,7 @@
-# Capacitor-generated native projects. The CI workflow regenerates these on the runner
-# via `npx cap add android` / `npx cap add ios`, so they are not committed here. For a
-# production setup, run `npx cap add ios` / `npx cap add android` locally and COMMIT the
-# generated android/ and ios/ folders so you control signing config, versioning, icons,
-# splash screens, and native plugins. Then remove these two ignores.
+# Capacitor-generated native projects: generated on the CI runner via `npx cap add`, BY
+# DESIGN (decision 2026-08-24) — the workflow patches versioning, the bundle id, and the
+# network-security config after generation, and package-lock.json pins the npm inputs, so
+# the build is reproducible without vendoring two native project trees here.
 /android/
 /ios/
 

@@ -284,3 +284,34 @@ down the reason, not by leaving it unmentioned. Do not stop at the newest sectio
 
 Work top-down through the priority order, then sweep the file from the top for anything still open
 and finish it. Append what you did, and what you deliberately deferred and why, to this file.
+
+---
+
+# NEW FINDING 2026-08-24 — the workflow surface was never swept
+
+My earlier audit reported "#5 — two unguarded `v*`-tag workflows". **That was an under-count.** This
+fork carries **22 workflows and only 4 carry any repository guard** (`den-api-env`, `den-db-migrate`,
+`download-stats`, `update-models`). Eighteen are unguarded and would run on this fork the moment
+Actions is funded.
+
+## 30. HIGH — 18 unguarded workflows, several of which publish or run on a schedule
+
+**Scheduled — burns minutes forever once funded, for nothing this product needs:**
+- `nightly-evals.yml` — runs upstream's eval suite every night.
+
+**Publishing paths — would publish under Ayers' account:**
+- `publish-ee-images.yml` (enterprise container images), `release.yml`,
+  `release-macos-aarch64.yml`, `alpha-macos-aarch64.yml`, `release-generic-installer.yml`,
+  `eval-generic-installer-release.yml`, `release-daytona-snapshot.yml`, `mobile-release.yml`.
+
+**Upstream infrastructure this fork has no use for:** `aur-validate.yml` (Arch User Repository),
+`daytona-eval-image.yml`, `den-db-check.yml`, `ci-openwork-ui-mcp.yml`.
+
+**The fix is one decision, applied uniformly:** every workflow this fork does not need is deleted,
+and every one it keeps gets the same
+`if: github.repository == 'ayers-software-repair/openwork'` guard at job level. Deleting is
+preferred — a fork carrying 18 workflows it never runs is the "no baggage" rule the owner set for
+v1, and each one is a live publish path nobody is watching.
+
+Do this **before** Actions is funded, not after. Once funded, an unguarded scheduled workflow does
+not wait for anyone's approval.

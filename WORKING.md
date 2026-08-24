@@ -231,3 +231,21 @@ patch upstream files); MED 6-16 including the mobile v1 ruling work (Capacitor 6
 stamping, keychain `-T`/partition-list, listing rewrite lives in howland docs); LOW 17-23;
 BAGGAGE 24-29. Ruling 1 (real installers) awaits the owner design conversation before any of
 the packaging surface here changes shape.
+
+---
+
+# VERIFICATION 2026-08-24 (coordinator)
+
+**Closed: 1 of 29.** #2 (arm64 fpm) is done and correctly leg-gated — `release.yml:106-114` installs
+ruby/fpm and exports `USE_SYSTEM_FPM=true` only on `ubuntu-24.04-arm`.
+
+**#1 remains the blocker and cannot be closed from here:** `ayers-software-repair/opencode` has zero
+releases, zero tags, zero workflow runs. It needs a funded dispatch of the sidecar workflow. All the
+work that makes that dispatch safe is done on the fork side and verified.
+
+**Everything else is untouched (28).** Highest value first: #3 (every packaged launch shows a raw
+HTTP 404 in Settings → Updates), #4 (`build-electron-desktop.yml:76` still carries the publish
+override this fork already diagnosed and removed elsewhere, and lacks `OPENCODE_GITHUB_REPO`), #5
+(two unguarded `v*`-tag workflows that would npm-publish and cut releases on this fork), then #6-#9
+(the `com.differentai.openwork` / `com.howland.app` identity split, the 1024px icns thrown away by a
+512px override, and "Copyright OpenWork" in every artifact), then mobile #13/#14 per the v1 ruling.

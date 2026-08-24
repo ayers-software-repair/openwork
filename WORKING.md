@@ -399,3 +399,22 @@ Deferred, with reasons: publishing latest*.yml updater metadata (a release-train
 change — needs the owner's word on desktop auto-update for 1.0); mac.binaries for the
 sidecars in electron-builder.yml (required BEFORE notarization is enabled, inert and
 untestable while unsigned — recorded in the fork's workflow header and READINESS).
+
+---
+
+# OWNER RULING 2026-08-24 — desktop auto-update SHIPS in 1.0 (implemented)
+
+release.yml: each leg rewrites its emitted electron-builder metadata so the file entries
+name the STABLE assets the release already serves (bytes identical after the rename, so the
+recorded sha512/size hold), then renames it to its per-platform+arch channel file —
+latest-mac.yml (mac arm64), latest-mac-x64.yml, latest.yml (win x64), latest-arm64.yml,
+latest-linux.yml, latest-linux-arm64.yml. The release job refuses to publish unless exactly
+six arrived. updater.mjs: the no-update short-circuit is deleted (the check is real) and
+howlandUpdaterChannel() pins the channel per platform+arch explicitly — electron-updater's
+filename heuristics would hand an arm64 Mac the Intel zip, since Howland's stable names
+carry no upstream arch tokens. Update PAYLOADS are the same stable assets; differential
+downloads stay disabled, so no blockmaps are needed. Known caveat (recorded in howland's
+KNOWN-ISSUES): Squirrel will not APPLY an update to an unsigned mac bundle — mac
+auto-update completes once the Developer ID cert lands; Windows/Linux apply normally.
+Also this pass: dead HOWLAND_DEFAULT_PORTS.brain deleted with a comment steering the next
+wiring at /status resolution (coordinator's #26 re-check accepted).

@@ -895,7 +895,11 @@ function flushPendingDeepLinks() {
 // Howland's server address comes from the agent config the server itself wrote (/connect), so the
 // app follows wherever the server actually is: localhost, a LAN name, or a tailnet name. The hub
 // reports which ports its services ended up on, since a port conflict can move one.
-const HOWLAND_DEFAULT_PORTS = { brain: 31050, library: 31051, hub: 31052, search: 31053 };
+// Only the ports this app actually calls. The brain is deliberately absent: nothing here
+// talks to it directly (sessions go through opencode, which resolves it from the agent
+// config the server wrote) — a hardcoded default sitting in this map would read as
+// authoritative and invite bypassing /status resolution.
+const HOWLAND_DEFAULT_PORTS = { library: 31051, hub: 31052, search: 31053 };
 
 async function howlandServerHost() {
   try {

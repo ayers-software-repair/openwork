@@ -33,10 +33,11 @@ function resolveAppVersion(app) {
 // feed would offer stock OpenWork as an "update" and overwrite this build. Howland releases carry
 // no electron-updater metadata (stable asset names, one release train, no latest*.yml uploaded),
 // so checkForUpdates would GET latest-mac.yml, receive a 404, and surface the RAW HTTP ERROR in
-// Settings -> Updates on every packaged launch. HOWLAND_UPDATER_METADATA below is the one switch:
-// it stays false until the release train actually publishes updater metadata, and while false the
-// check short-circuits to a clean no-update. It can never pull upstream either way.
-const HOWLAND_UPDATER_METADATA = false; // flip when latest*.yml ships on the release train
+// Settings -> Updates on every packaged launch. OWNER RULING 2026-08-24: auto-update SHIPS in
+// 1.0 — release.yml publishes stable-named metadata per platform+arch (see
+// howlandUpdaterChannel below), the update payloads are the same stable-named assets the
+// site serves, and the server preflight sweeps the metadata URLs so a 404 here is caught
+// before a release, not on every user's machine forever. It can never pull upstream.
 const ELECTRON_UPDATER_FEEDS = Object.freeze({
   stable: "https://github.com/ayers-software-repair/howland-releases/releases/latest/download",
   alpha: "https://github.com/ayers-software-repair/howland-releases/releases/latest/download",
@@ -158,6 +159,16 @@ function updaterChannelState(app, channel) {
   };
 }
 
+// One metadata file per platform+arch, EXPLICITLY — electron-updater's filename heuristics
+// would happily hand an arm64 Mac the Intel zip because Howland's stable names carry no
+// upstream-style arch tokens. The names here must match release.yml's metadata rename step.
+function howlandUpdaterChannel() {
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  if (process.platform === "darwin") return arch === "arm64" ? "latest-mac" : "latest-mac-x64";
+  if (process.platform === "win32") return arch === "arm64" ? "latest-arm64" : "latest";
+  return arch === "arm64" ? "latest-linux-arm64" : "latest-linux";
+}
+
 async function applyElectronUpdaterFeed(app, updater) {
   const channel = await readElectronUpdaterChannel(app);
   const state = updaterChannelState(app, channel);
@@ -166,7 +177,7 @@ async function applyElectronUpdaterFeed(app, updater) {
   // the latest stable so users can return to the stable channel deliberately.
   updater.allowDowngrade = state.channel === "stable";
   if (updater?.setFeedURL) {
-    updater.setFeedURL({ provider: "generic", url: state.feedUrl });
+    updater.setFeedURL({ provider: "generic", url: state.feedUrl, channel: howlandUpdaterChannel() });
   }
   return state;
 }
@@ -308,11 +319,6 @@ export function registerUpdaterIpc({ app, ipcMain, getMainWindow }) {
       ? await applyElectronUpdaterFeed(app, updater)
       : updaterChannelState(app, await readElectronUpdaterChannel(app));
     if (!updater) return { available: false, reason: "unavailable", ...channelState };
-    if (!HOWLAND_UPDATER_METADATA) {
-      // Clean no-update, not a fetch that must 404 (see HOWLAND_UPDATER_METADATA above).
-      checkedUpdateVersion = null;
-      return { available: false, currentVersion: resolveAppVersion(app), latestVersion: null, releaseDate: null, releaseNotes: null, ...channelState };
-    }
     try {
       const result = await updater.checkForUpdates();
       const info = result?.updateInfo ?? null;

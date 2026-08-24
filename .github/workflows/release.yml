@@ -217,6 +217,48 @@ jobs:
           }
           Remove-Item $pfx
 
+      # OWNER RULING 2026-08-24: auto-update ships in 1.0. electron-builder emits updater
+      # metadata even under --publish never; its file entries reference the VERSIONED
+      # artifact names, while the release serves STABLE names — same bytes, renamed, so the
+      # recorded sha512/size stay valid and only the names need rewriting. Each leg then
+      # renames its metadata to the per-platform+arch channel file the app requests
+      # (howlandUpdaterChannel in electron/updater.mjs — the two lists must match).
+      - name: Stable-name the updater metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd apps/desktop/dist-electron
+          case "${{ matrix.artifact }}" in
+            macos)         SRC=latest-mac.yml;  OUT=latest-mac.yml ;;
+            macos-intel)   SRC=latest-mac.yml;  OUT=latest-mac-x64.yml ;;
+            windows)       SRC=latest.yml;      OUT=latest.yml ;;
+            windows-arm64) SRC=latest.yml;      OUT=latest-arm64.yml ;;
+            linux)         SRC=latest-linux.yml;       OUT=latest-linux.yml ;;
+            linux-arm64)   SRC=$(find . -maxdepth 1 -name 'latest-linux*.yml' -printf '%f\n' | head -1); OUT=latest-linux-arm64.yml ;;
+          esac
+          test -f "$SRC" || { echo "::error::updater metadata $SRC was not emitted"; exit 1; }
+          python3 - "$SRC" <<'PY'
+          import re, sys
+          src = sys.argv[1]
+          stable = {
+            "macos":         {"zip": "Howland-macOS.zip",        "dmg": "Howland-macOS.dmg"},
+            "macos-intel":   {"zip": "Howland-macOS-Intel.zip",  "dmg": "Howland-macOS-Intel.dmg"},
+            "windows":       {"exe": "Howland-Windows.exe"},
+            "windows-arm64": {"exe": "Howland-Windows-arm64.exe"},
+            "linux":         {"AppImage": "Howland-Linux.AppImage"},
+            "linux-arm64":   {"AppImage": "Howland-Linux-arm64.AppImage"},
+          }["${{ matrix.artifact }}"]
+          text = open(src).read()
+          def sub(m):
+              ext = m.group(1)
+              return stable.get(ext, m.group(0))
+          text = re.sub(r"howland-[A-Za-z0-9._-]+\.(zip|dmg|exe|AppImage)", sub, text)
+          open(src, "w").write(text)
+          print(text)
+          PY
+          if [ "$SRC" != "$OUT" ]; then mv "$SRC" "$OUT"; fi
+          rm -f latest*.yml.bak
+
       - name: Upload installers
         uses: actions/upload-artifact@v7
         with:
@@ -228,6 +270,7 @@ jobs:
             apps/desktop/dist-electron/*.tar.gz
             apps/desktop/dist-electron/*.deb
             apps/desktop/dist-electron/*.exe
+            apps/desktop/dist-electron/latest*.yml
 
   release:
     needs: build
@@ -289,6 +332,11 @@ jobs:
           cp "$(pick '*linux-arm64*.AppImage')"  release/Howland-Linux-arm64.AppImage
           cp "$(pick '*linux-arm64*.tar.gz')"    release/Howland-Linux-arm64.tar.gz
           cp "$(pick '*linux-arm64*.deb')"       release/Howland-Linux-arm64.deb
+          # The six per-platform+arch updater metadata files ride the same release; each leg
+          # produced exactly one, uniquely named.
+          find artifacts -name 'latest*.yml' -exec cp {} release/ \;
+          YMLS=$(find release -maxdepth 1 -name 'latest*.yml' | wc -l)
+          if [ "$YMLS" -ne 6 ]; then echo "::error::expected 6 updater metadata files, found $YMLS"; exit 1; fi
           # Integrity: checksums published next to the binaries (sha256sum -c SHA256SUMS-desktop.txt).
           ( cd release && sha256sum Howland-* > SHA256SUMS-desktop.txt )
           echo "Stable-named installers:"; ls -la release

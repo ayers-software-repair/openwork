@@ -22,6 +22,10 @@ permissions:
 
 jobs:
   build:
+    # Repo guard: this fork rebases onto upstream, and an unguarded release workflow on the
+    # wrong clone is a live publish path. The guard also keeps a future upstream-merged copy
+    # inert anywhere but here.
+    if: github.repository == 'ayers-software-repair/openwork'
     strategy:
       fail-fast: false
       matrix:
@@ -223,6 +227,7 @@ jobs:
 
   release:
     needs: build
+    if: github.repository == 'ayers-software-repair/openwork'
     runs-on: ubuntu-latest
     # ONE RELEASE TRAIN guard: this workflow and mobile-release.yml both fire on howland-v*
     # tags and publish onto the SAME howland-releases release. A shared job-level group

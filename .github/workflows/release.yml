@@ -98,6 +98,21 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "macOS signing enabled (Developer ID Application cert via CSC_LINK)."
 
+      # app-builder's bundled fpm is an x86 binary on every non-amd64 platform (its
+      # tool.go picks "-x86_64" for amd64 and "-x86" for everything else, and
+      # electron-builder-binaries publishes no linux-arm64 fpm at all), so the arm64 leg's
+      # .deb target cannot use it. USE_SYSTEM_FPM is app-builder's documented escape hatch;
+      # a system Ruby fpm builds the same package. Pinned so the .deb metadata is stable.
+      - name: System fpm for the arm64 .deb (app-builder ships no arm64 fpm)
+        if: ${{ matrix.os == 'ubuntu-24.04-arm' }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q ruby ruby-dev build-essential
+          sudo gem install fpm -v 1.15.1 --no-document
+          fpm --version
+          echo "USE_SYSTEM_FPM=true" >> "$GITHUB_ENV"
+
       # The after-sign hook (apps/desktop/scripts/electron-after-sign.cjs) notarizes only when
       # MACOS_NOTARIZE=true and needs APPLE_API_KEY_PATH (.p8 on disk), APPLE_API_KEY (key id)
       # and APPLE_API_ISSUER — the exact env set upstream's release-macos-aarch64.yml feeds

@@ -44,6 +44,7 @@ jobs:
   # repo's server-release.yml) and exposes them as outputs the build jobs gate on.
   # force_build=true on manual dispatch still runs unsigned compile-proof builds on demand.
   gate:
+    if: github.repository == 'ayers-software-repair/openwork'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -69,7 +70,7 @@ jobs:
 
   build-android:
     needs: gate
-    if: ${{ needs.gate.outputs.android_build == 'true' }}
+    if: ${{ github.repository == 'ayers-software-repair/openwork' && needs.gate.outputs.android_build == 'true' }}
     runs-on: ubuntu-latest
     # Expose whether this leg produced a signed artifact, so the release job can skip cleanly
     # when nothing was signed (no artifacts to download/publish).
@@ -259,7 +260,7 @@ jobs:
 
   build-ios:
     needs: gate
-    if: ${{ needs.gate.outputs.ios_build == 'true' }}
+    if: ${{ github.repository == 'ayers-software-repair/openwork' && needs.gate.outputs.ios_build == 'true' }}
     runs-on: macos-latest
     # Expose whether this leg produced a signed IPA (see build-android note).
     outputs:
@@ -504,7 +505,7 @@ jobs:
     # even if a build leg failed or was skipped by the gate (skipped legs have empty outputs),
     # so an unsigned or fully gated-off run skips this job entirely (nothing to download or
     # publish, no spurious failure).
-    if: ${{ always() && (needs.build-android.outputs.signed == 'true' || needs.build-ios.outputs.signed == 'true') }}
+    if: ${{ always() && github.repository == 'ayers-software-repair/openwork' && (needs.build-android.outputs.signed == 'true' || needs.build-ios.outputs.signed == 'true') }}
     runs-on: ubuntu-latest
     # Shared with release.yml's publish job — serializes publishes onto the one release train.
     concurrency:
@@ -524,7 +525,10 @@ jobs:
       - name: Collect mobile artifacts
         run: |
           mkdir -p release
-          for f in Howland-Android.apk Howland-Android.aab Howland-iOS.ipa; do
+          # DECISION 2026-08-24: the iOS .ipa is NEVER a release asset — it exists for App
+          # Store Connect submission and stays a CI artifact only. Android apk (sideload is a
+          # real channel for an offline-first product) and aab (the store artifact) publish.
+          for f in Howland-Android.apk Howland-Android.aab; do
             src="$(find artifacts -type f -name "$f" | head -1)"
             if [ -n "$src" ]; then cp "$src" "release/$f"; else echo "absent (unsigned/skipped): $f"; fi
           done

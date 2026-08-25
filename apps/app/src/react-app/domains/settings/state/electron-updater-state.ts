@@ -206,6 +206,15 @@ export function useElectronUpdaterState(options: UseElectronUpdaterStateOptions)
         });
         return;
       }
+      // A check the preference deliberately skipped is NOT a failed check. Painting it red
+      // would be the same lie the four honest outcomes exist to prevent, re-entering here.
+      if (result.reason === "auto-update-off") {
+        setUpdateStatus({
+          state: "idle",
+          message: "Automatic update checks are off. Use Check for updates to check now.",
+        });
+        return;
+      }
       if (result.reason) {
         setUpdateStatus({ state: "error", message: result.reason });
         return;

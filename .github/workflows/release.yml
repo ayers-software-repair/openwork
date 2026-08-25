@@ -44,6 +44,31 @@ on:
       tag:
         description: 'Release tag to create/attach (e.g. howland-v1.0.0)'
         required: true
+      # SELECTIVE BUILDS (owner order 2026-08-25: "test the Mac server first, then widen").
+      # One boolean per platform, DEFAULT TRUE, and a tag push carries no inputs at all — so
+      # every gate treats EMPTY as true. The naive `if: inputs.heads_macos` is false on a tag
+      # push and would silently ship nothing on the event that matters most (neptune's catch;
+      # both products use the same gate expression, names and defaults).
+      heads_macos:
+        description: 'Build the macOS desktop heads'
+        type: boolean
+        default: true
+      heads_windows:
+        description: 'Build the Windows desktop heads'
+        type: boolean
+        default: true
+      heads_linux:
+        description: 'Build the Linux desktop heads'
+        type: boolean
+        default: true
+      heads_android:
+        description: 'Build the Android heads'
+        type: boolean
+        default: true
+      chain:
+        description: 'On success, start the howland server release automatically'
+        type: boolean
+        default: true
 
 # The GITHUB_TOKEN only checks out this repo; publishing goes through RELEASES_PAT.
 permissions:
@@ -65,9 +90,42 @@ jobs:
     if: github.repository == 'ayers-software-repair/openwork'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      desktop_matrix: ${{ steps.select.outputs.matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      # SELECTION, computed once. The desktop matrix spans three platforms inside one job, so
+      # per-platform selection has to shape the MATRIX — a deselected macOS leg that merely
+      # exits early still spins up a 10x-billed runner to decide not to work. Empty inputs
+      # (a tag push) select everything.
+      - name: Select the desktop legs to build
+        id: select
+        env:
+          SEL_MACOS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_macos }}
+          SEL_WINDOWS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_windows }}
+          SEL_LINUX: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_linux }}
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, os
+          legs = {
+              "macos":   [{"os": "macos-latest",    "artifact": "macos"},
+                          {"os": "macos-15-intel",  "artifact": "macos-intel"}],
+              "windows": [{"os": "windows-latest",  "artifact": "windows"},
+                          {"os": "windows-11-arm",  "artifact": "windows-arm64"}],
+              "linux":   [{"os": "ubuntu-latest",   "artifact": "linux"},
+                          {"os": "ubuntu-24.04-arm","artifact": "linux-arm64"}],
+          }
+          include = []
+          for platform, rows in legs.items():
+              if os.environ["SEL_" + platform.upper()] == "true":
+                  include += rows
+          print("matrix=" + json.dumps({"include": include}))
+          print("selected: " + json.dumps([r["artifact"] for r in include]),
+                file=__import__("sys").stderr)
+          EOF
 
       - name: The pinned sidecar release exists, with every asset the legs will ask for
         env:
@@ -98,6 +156,30 @@ jobs:
           fi
           echo "Sidecar release $VERSION carries all six assets."
 
+          # PROVENANCE, not just existence. The version is a NAME: change the opencode fork,
+          # forget to re-cut the sidecar, and this release still EXISTS — so an existence check
+          # passes while every desktop leg builds against a stale sidecar and nothing reports
+          # it. The sidecar release stamps the source commit it was built from; constants.json
+          # pins that commit beside the version; they must agree (owner ruling 2026-08-25).
+          WANT_COMMIT=$(python3 -c "import json;print(json.load(open('constants.json'))['opencodeCommit'])")
+          GOT_COMMIT=$(gh release download "$VERSION" --repo "$REPO" \
+            --pattern SOURCE-COMMIT.txt --output - 2>/dev/null || true)
+          if [ -z "$GOT_COMMIT" ]; then
+            echo "::error::sidecar release $VERSION carries no SOURCE-COMMIT.txt — it predates"
+            echo "::error::provenance stamping. Re-dispatch the fork's howland-sidecar.yml (free,"
+            echo "::error::public repo) and it will stamp the commit it builds from."
+            exit 1
+          fi
+          if [ "$GOT_COMMIT" != "$WANT_COMMIT" ]; then
+            echo "::error::sidecar provenance mismatch:"
+            echo "::error::  released binaries were built from  $GOT_COMMIT"
+            echo "::error::  constants.json pins               $WANT_COMMIT"
+            echo "::error::Either re-cut the sidecar (fork changed, release stale) or update"
+            echo "::error::constants.json opencodeCommit (release is right, pin is stale)."
+            exit 1
+          fi
+          echo "Sidecar provenance verified: built from $GOT_COMMIT."
+
       # The publish happens at the very END of a long run. A PAT that cannot write is worth
       # discovering in minute one, not after every runner has been paid for.
       - name: The releases PAT can write to the releases repo
@@ -124,31 +206,22 @@ jobs:
     needs: preflight
     # Repo guard: this fork rebases onto upstream, and an unguarded release workflow on the
     # wrong clone is a live publish path. The guard also keeps a future upstream-merged copy
-    # inert anywhere but here.
-    if: github.repository == 'ayers-software-repair/openwork'
+    # inert anywhere but here. The heads_ clause skips the whole job when no desktop platform
+    # is selected — a dynamic matrix with an EMPTY include list is a workflow error, not a
+    # no-op, so the job has to not run at all.
+    if: >-
+      github.repository == 'ayers-software-repair/openwork' &&
+      (github.event_name != 'workflow_dispatch' ||
+       inputs.heads_macos || inputs.heads_windows || inputs.heads_linux)
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            artifact: macos
-          # Intel Macs get a native x64 build: users' machines are unknown, so both Mac
-          # architectures ship. macos-15-intel is GitHub's x64 image (supported into 2027);
-          # process.arch=x64 there makes prepare-sidecar fetch the x86_64 opencode automatically.
-          - os: macos-15-intel
-            artifact: macos-intel
-          - os: ubuntu-latest
-            artifact: linux
-          # Linux arm64 (Raspberry Pi, arm64 servers/desktops). Native runner rather than a
-          # cross-build: electron-builder needs real per-architecture native modules, and
-          # prepare-sidecar.mjs resolves the sidecar from process.arch on the host. The sibling
-          # release-macos-aarch64.yml already builds this way on an arm runner.
-          - os: ubuntu-24.04-arm
-            artifact: linux-arm64
-          - os: windows-latest
-            artifact: windows
-          - os: windows-11-arm
-            artifact: windows-arm64
+      # Computed by preflight from the heads_ inputs; a tag push selects all six legs. The
+      # per-leg facts that used to live inline as comments: macos-15-intel is GitHub's x64
+      # image (supported into 2027) so Intel Macs get a native build, and process.arch there
+      # makes prepare-sidecar fetch the x86_64 sidecar automatically; the Linux arm64 leg is a
+      # native arm runner rather than a cross-build because electron-builder needs real
+      # per-architecture native modules.
+      matrix: ${{ fromJSON(needs.preflight.outputs.desktop_matrix) }}
     runs-on: ${{ matrix.os }}
     # A hung leg would otherwise burn the 360-minute default; notarization can add 5-20 min.
     timeout-minutes: 60
@@ -447,7 +520,11 @@ jobs:
 
   build-android:
     needs: preflight
-    if: github.repository == 'ayers-software-repair/openwork'
+    # Empty inputs (a tag push) mean true — the naive `inputs.heads_android` alone is false
+    # there and would silently skip Android on every real release.
+    if: >-
+      github.repository == 'ayers-software-repair/openwork' &&
+      (github.event_name != 'workflow_dispatch' || inputs.heads_android)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -752,7 +829,18 @@ jobs:
       # Checksums describe WHAT SHIPPED, not what was hoped for: a manifest listing an asset the
       # release does not carry fails `sha256sum -c` for every user who checks. Written last so
       # neither manifest can describe itself.
+      #
+      # SUBSET RULE (agreed with neptune, owner design): the DESKTOP manifest spans three
+      # platforms, so a subset run must NOT regenerate it — softprops would overwrite the full
+      # published manifest with one describing only this run's platforms, and every user
+      # verifying an untouched, perfectly valid asset would be told it is not in the manifest.
+      # Worse: the assets this run DID replace keep their old hashes in the published manifest,
+      # so verifying those FAILS until a full run re-publishes it. The summary says so. The
+      # ANDROID manifest describes only the two Android files, both rebuilt whenever Android is
+      # selected at all, so it regenerates safely on any run that includes Android.
       - name: Checksum what shipped
+        env:
+          FULL_DESKTOP: ${{ github.event_name != 'workflow_dispatch' || (inputs.heads_macos && inputs.heads_windows && inputs.heads_linux) }}
         run: |
           set -euo pipefail
           cd release
@@ -763,7 +851,9 @@ jobs:
           {
             desktop=$(ls Howland-Desktop-*.dmg Howland-Desktop-*.zip Howland-Desktop-*.exe \
                          Howland-Desktop-*.AppImage Howland-Desktop-*.deb 2>/dev/null || true)
-            if [ -n "$desktop" ]; then sha256sum $desktop > Howland-Desktop-CHECKSUMS.txt; fi
+            if [ "$FULL_DESKTOP" = "true" ] && [ -n "$desktop" ]; then
+              sha256sum $desktop > Howland-Desktop-CHECKSUMS.txt
+            fi
             client=$(ls Howland-Client-Android.* 2>/dev/null || true)
             if [ -n "$client" ]; then sha256sum $client > Howland-Client-CHECKSUMS.txt; fi
           }
@@ -807,62 +897,69 @@ jobs:
             *) VERSION=1.0.0 ;;         # branch build / malformed tag — the locked version
           esac
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
       # RECONCILIATION — the whole point of the design. Three outcomes per expected asset:
       #   present                      -> published
       #   absent WITH a skip record    -> reported in the summary, run stays GREEN
       #   absent WITHOUT a skip record -> HARD FAIL
-      # The third is what separates "we had no certificate" from "we built it and lost it". A leg
-      # that skips leaves a reason; a leg that broke leaves nothing, so its silence is the signal.
+      # The third separates "we had no certificate" from "we built it and lost it": a skipping
+      # leg leaves a reason, a broken one leaves nothing, so silence is the signal.
+      #
+      # The expected list NARROWS with the heads_ selection — a deselected platform was never
+      # going to build, which is a different fact from both of the above and gets NO line and
+      # NO skip record (agreed with neptune). The manifests are release-level artifacts: the
+      # desktop manifest is expected only on a full desktop selection (see the checksum step),
+      # the Android manifest whenever Android is selected.
       - name: Reconcile against the expected assets
+        env:
+          SEL_MACOS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_macos }}
+          SEL_WINDOWS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_windows }}
+          SEL_LINUX: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_linux }}
+          SEL_ANDROID: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_android }}
         run: |
           set -euo pipefail
-          EXPECTED="
-          Howland-Desktop-macOS-arm64.dmg
-          Howland-Desktop-macOS-arm64.zip
-          Howland-Desktop-macOS-x64.dmg
-          Howland-Desktop-macOS-x64.zip
-          Howland-Desktop-Windows-x64.exe
-          Howland-Desktop-Windows-arm64.exe
-          Howland-Desktop-Linux-x64.AppImage
-          Howland-Desktop-Linux-x64.deb
-          Howland-Desktop-Linux-arm64.AppImage
-          Howland-Desktop-Linux-arm64.deb
-          Howland-Desktop-CHECKSUMS.txt
-          latest-mac.yml
-          latest-mac-x64.yml
-          latest.yml
-          latest-arm64.yml
-          latest-linux.yml
-          latest-linux-arm64.yml
-          Howland-Client-Android.apk
-          Howland-Client-Android.aab
-          Howland-Client-CHECKSUMS.txt
-          "
-          published=""; absent=""; unexplained=""
-          total=0; n=0; na=0
-          # A skip record is skips-<leg>/<Asset-Name>.txt inside the downloaded artifacts.
-          # Always exits 0. Under `set -e`, a function ending in a false test would abort the
-          # whole step through `reason=$(reason_for ...)` — and it would abort on the ORDINARY
-          # case of an asset that simply has no skip record.
+          EXPECTED=""
+          deselected=""
+          if [ "$SEL_MACOS" = "true" ]; then
+            EXPECTED="$EXPECTED Howland-Desktop-macOS-arm64.dmg Howland-Desktop-macOS-arm64.zip"
+            EXPECTED="$EXPECTED Howland-Desktop-macOS-x64.dmg Howland-Desktop-macOS-x64.zip"
+            EXPECTED="$EXPECTED latest-mac.yml latest-mac-x64.yml"
+          else deselected="$deselected macOS"; fi
+          if [ "$SEL_WINDOWS" = "true" ]; then
+            EXPECTED="$EXPECTED Howland-Desktop-Windows-x64.exe Howland-Desktop-Windows-arm64.exe"
+            EXPECTED="$EXPECTED latest.yml latest-arm64.yml"
+          else deselected="$deselected Windows"; fi
+          if [ "$SEL_LINUX" = "true" ]; then
+            EXPECTED="$EXPECTED Howland-Desktop-Linux-x64.AppImage Howland-Desktop-Linux-x64.deb"
+            EXPECTED="$EXPECTED Howland-Desktop-Linux-arm64.AppImage Howland-Desktop-Linux-arm64.deb"
+            EXPECTED="$EXPECTED latest-linux.yml latest-linux-arm64.yml"
+          else deselected="$deselected Linux"; fi
+          if [ "$SEL_MACOS" = "true" ] && [ "$SEL_WINDOWS" = "true" ] && [ "$SEL_LINUX" = "true" ]; then
+            EXPECTED="$EXPECTED Howland-Desktop-CHECKSUMS.txt"
+          fi
+          if [ "$SEL_ANDROID" = "true" ]; then
+            EXPECTED="$EXPECTED Howland-Client-Android.apk Howland-Client-Android.aab Howland-Client-CHECKSUMS.txt"
+          else deselected="$deselected Android"; fi
+
+          # Always exits 0: under `set -e` a function ending in a false test would abort the
+          # step on the ORDINARY case of an asset with no skip record.
           reason_for() {
             local f
-            f=$(find artifacts -type f -name "$1.txt" | head -1)
+            f=$(find artifacts -type f -name "$1.txt" -path '*skips*' | head -1)
             if [ -n "$f" ]; then head -1 "$f"; fi
             return 0
           }
+          published=""; absent=""; unexplained=""
+          total=0; n=0; na=0
           for asset in $EXPECTED; do
             total=$((total+1))
             if [ -f "release/$asset" ]; then
-              n=$((n+1))
-              published="$published- $asset
+              n=$((n+1)); published="$published- $asset
           "
               continue
             fi
             reason=$(reason_for "$asset")
             if [ -n "$reason" ]; then
-              na=$((na+1))
-              absent="$absent- $asset — $reason
+              na=$((na+1)); absent="$absent- $asset — $reason
           "
             else
               unexplained="$unexplained- $asset
@@ -870,18 +967,30 @@ jobs:
             fi
           done
 
-          # printf '%s' on the accumulated text, never printf "$var": an asset name containing a
-          # % would otherwise be read as a format specifier.
+          # printf '%s' on the accumulated text, never printf "$var": an asset name containing
+          # a % would otherwise be read as a format specifier.
           {
             echo "## Howland ${{ steps.v.outputs.version }} — release contents"
             echo
+            if [ -n "$deselected" ]; then
+              sel=$(echo "$deselected" | sed 's/^ *//; s/ /, /g')
+              echo "**Subset build — not requested:** $sel."
+              echo
+              if [ "$SEL_MACOS" != "true" ] || [ "$SEL_WINDOWS" != "true" ] || [ "$SEL_LINUX" != "true" ]; then
+                echo "**Howland-Desktop-CHECKSUMS.txt was NOT regenerated.** It still describes the"
+                echo "previous build of any desktop asset this run replaced, so verifying those"
+                echo "specific downloads will FAIL until a full desktop build re-publishes it."
+                echo "Everything this run did not touch is still described correctly."
+                echo
+              fi
+            fi
             echo "### Published ($n of $total)"
             echo
             printf '%s' "$published" | sed 's/^ *//'
             echo
-            if [ "$na" -eq 0 ]; then
+            if [ "$na" -eq 0 ] && [ -z "$unexplained" ]; then
               echo "Every expected asset was built and published."
-            else
+            elif [ "$na" -gt 0 ]; then
               echo "### Not built ($na)"
               echo
               printf '%s' "$absent" | sed 's/^ *//'
@@ -904,6 +1013,7 @@ jobs:
           fi
           echo "Reconciled: $n of $total published, the rest accounted for."
 
+
       # Publish to the PUBLIC howland-releases repo (the public download + issues home). PUBLIC so the site
       # links to /releases/latest/download/<StableName>, always current, zero redeploy. RELEASES_PAT = a
       # token with contents:write on ayers-software-repair/howland-releases, set as a secret on this fork.
@@ -925,3 +1035,31 @@ jobs:
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
+
+      # THE CHAIN, link two: desktop -> server. Runs only if every step above succeeded
+      # (default step semantics — no always()), so a failed publish never starts a server
+      # build. Opt-OUT via the `chain` input; a tag push carries no inputs and chains. The
+      # heads_ selection is forwarded so a subset desktop run starts an equally-narrow server
+      # run instead of spending full-matrix money nobody asked for. The order itself is real:
+      # both publish onto the same howland-v1.0.0 release, and this used to be a numbered list
+      # in a document the owner did not know existed (owner ruling 2026-08-25 — a written step
+      # is not a step that happens).
+      - name: Start the howland server release
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.chain }}
+        env:
+          # Needs actions:write on ayers-software-repair/howland. If RELEASES_PAT is
+          # contents-only this fails LOUDLY here, after the desktop release published fine —
+          # rerun the server workflow by hand and extend the PAT.
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          SEL_MACOS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_macos }}
+          SEL_WINDOWS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_windows }}
+          SEL_LINUX: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_linux }}
+        run: |
+          set -euo pipefail
+          gh workflow run server-release.yml \
+            --repo ayers-software-repair/howland --ref main \
+            -f heads_macos="$SEL_MACOS" -f heads_windows="$SEL_WINDOWS" -f heads_linux="$SEL_LINUX"
+          {
+            echo
+            echo "Started the howland server release (heads: macos=$SEL_MACOS windows=$SEL_WINDOWS linux=$SEL_LINUX)."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -143,7 +143,7 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "macOS notarization enabled (notarytool API key)."
 
-      # Main package step. On Ubuntu this builds AppImage + tar.gz + deb (deb comes from the
+      # Main package step. On Ubuntu this builds AppImage + deb (both come from the
       # electron-builder.yml linux.target list — see the comment there for why deb can't be
       # added purely via a `-c` override). Branding stays build-time-only via `-c`.
       - name: Package Electron desktop (Howland installers)
@@ -267,7 +267,6 @@ jobs:
             apps/desktop/dist-electron/*.dmg
             apps/desktop/dist-electron/*.zip
             apps/desktop/dist-electron/*.AppImage
-            apps/desktop/dist-electron/*.tar.gz
             apps/desktop/dist-electron/*.deb
             apps/desktop/dist-electron/*.exe
             apps/desktop/dist-electron/latest*.yml
@@ -362,8 +361,13 @@ jobs:
           # Integrity: checksums published next to the binaries
           # (sha256sum -c Howland-Desktop-CHECKSUMS.txt). Explicit glob, and the manifest is
           # written last so it cannot describe itself.
-          ( cd release && sha256sum Howland-Desktop-*.dmg Howland-Desktop-*.zip Howland-Desktop-*.exe \
-              Howland-Desktop-*.AppImage Howland-Desktop-*.deb > Howland-Desktop-CHECKSUMS.txt )
+          ( cd release && sha256sum \
+              Howland-Desktop-macOS-arm64.dmg Howland-Desktop-macOS-arm64.zip \
+              Howland-Desktop-macOS-x64.dmg Howland-Desktop-macOS-x64.zip \
+              Howland-Desktop-Windows-x64.exe Howland-Desktop-Windows-arm64.exe \
+              Howland-Desktop-Linux-x64.AppImage Howland-Desktop-Linux-x64.deb \
+              Howland-Desktop-Linux-arm64.AppImage Howland-Desktop-Linux-arm64.deb \
+              > Howland-Desktop-CHECKSUMS.txt )
           echo "Stable-named installers:"; ls -la release
 
       # Clean product version from the tag (howland-v1.0.0 -> 1.0.0), normalized EXACTLY like

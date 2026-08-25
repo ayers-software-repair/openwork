@@ -572,7 +572,11 @@ jobs:
             if [ -n "$src" ]; then cp "$src" "release/$f"; else echo "absent (unsigned/skipped): $f"; fi
           done
           # Integrity: checksums published next to the binaries (sha256sum -c Howland-Client-CHECKSUMS.txt).
-          if ls release/Howland-* >/dev/null 2>&1; then ( cd release && sha256sum Howland-* > Howland-Client-CHECKSUMS.txt ); fi
+          # Extension-scoped, never a bare Howland-* that could match the manifest itself.
+          # The .ipa is deliberately absent: it goes to App Store Connect, never the release.
+          if ls release/Howland-Client-Android.* >/dev/null 2>&1; then
+            ( cd release && sha256sum Howland-Client-Android.* > Howland-Client-CHECKSUMS.txt )
+          fi
           echo "Mobile release assets:"; ls -la release || true
 
       # Clean product version from the tag (howland-mobile-v1.0.0 / howland-v1.0.0 -> 1.0.0).

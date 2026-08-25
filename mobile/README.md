@@ -67,31 +67,27 @@ env vars in `capacitor.config.ts` control this:
 
 ## Release workflow and signing
 
-`.github/workflows/mobile-release.yml` builds Android (APK + AAB) and iOS (IPA) on tag
-`howland-v*` or `howland-mobile-v*`, renames outputs to stable names
-(`Howland-Client-Android.apk`, `Howland-Client-Android.aab`, `Howland-Client-iOS-arm64.ipa`), and publishes them to
+Android builds in **`.github/workflows/release.yml`** (the one desktop+mobile release; the
+separate mobile workflow is folded in). The `build-android` leg publishes
+`Howland-Client-Android.apk` / `.aab` + `Howland-Client-CHECKSUMS.txt` onto the shared
+`howland-v1.0.0` release. Without its signing secrets the leg SKIPS and the run summary names
+the missing secret — there is no unsigned compile-proof mode any more; the release publishes
+what it can sign.
+
+iOS builds in **`.github/workflows/ios-submission.yml`** — its own dispatch, out of the
+release chain. It HARD FAILS without signing secrets, and its `.ipa` is a 90-day CI artifact
+on the run page (never a release asset; App Store Connect is the channel). The export
+`method` defaults to `app-store`; change it (with a matching provisioning profile) to
+`ad-hoc` or `development` for direct device sideloading.
+
+Secrets, named exactly as the workflows read them:
+
+Android: `ANDROID_KEYSTORE_BASE64` (base64 of the upload keystore), `ANDROID_KEY_ALIAS`,
+`ANDROID_KEY_PASSWORD`, `ANDROID_STORE_PASSWORD`.
+
+iOS: `APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`, `APPLE_TEAM_ID`,
+`APPLE_PROVISIONING_PROFILE_BASE64` (bundle id `com.howland.app`; the profile NAME is derived
+from the file — no separate name secret).
+
+Publishing (shared with the desktop legs): `RELEASES_PAT`, `contents:write` on
 `ayers-software-repair/howland-releases`.
-
-**Signing is gated on repository secrets.** When a platform's signing secrets are absent, the
-build still **compiles** (proving it builds) but produces **no store-signed artifact**. Add
-these secrets to complete signing:
-
-Android:
-- `ANDROID_KEYSTORE_BASE64` — base64 of your upload keystore (`base64 -i upload.keystore`).
-- `ANDROID_KEY_ALIAS`
-- `ANDROID_KEY_PASSWORD`
-- `ANDROID_STORE_PASSWORD`
-
-iOS (Apple Developer account required):
-- `APPLE_CERT_P12_BASE64` — base64 of your Distribution certificate `.p12`.
-- `APPLE_CERT_PASSWORD` — password for that `.p12`.
-- `APPLE_TEAM_ID` — your 10-character Apple Team ID.
-- `APPLE_PROVISIONING_PROFILE_BASE64` — base64 of a provisioning profile whose bundle id is
-  `com.howland.app`. The workflow derives the profile name from this file (no separate
-  `APPLE_PROVISIONING_PROFILE_NAME` secret needed).
-
-Also required to publish (already used by the desktop release workflow):
-- `RELEASES_PAT` — a token with `contents:write` on `ayers-software-repair/howland-releases`.
-
-The iOS export `method` in the workflow defaults to `app-store`; change it (and use a matching
-provisioning profile) to `ad-hoc` or `development` for direct device sideloading.

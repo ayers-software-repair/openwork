@@ -428,6 +428,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: howland-${{ matrix.artifact }}
+          # An upload that matched nothing must not report success: the leg would go green
+          # having produced no installer, and the failure would surface one job later as an
+          # unexplained absence — pointing at the release job rather than the leg that broke.
+          if-no-files-found: error
           path: |
             apps/desktop/dist-electron/*.dmg
             apps/desktop/dist-electron/*.zip
@@ -662,6 +666,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: mobile-android
+          if-no-files-found: error
           path: mobile-artifacts/*
   release:
     # Every head, one publish. `always()` because a leg that could not sign still ends green and

@@ -202,6 +202,32 @@ jobs:
           fi
           echo "RELEASES_PAT has write access."
 
+      # The CHAIN's scope, checked before any runner is spent — not just the publish's. The
+      # publish needs contents:write on howland-releases; dispatching the server release needs
+      # ACTIONS scope on the howland repo, which contents does not grant. Without this probe,
+      # preflight passed on a contents-only PAT and the chain still died at the last step of
+      # the run, after every build was paid for.
+      #
+      # LIMIT, stated so nobody reads more into it: listing workflows proves actions:READ.
+      # Write cannot be proven without actually dispatching (a mutation), so a read-and-write
+      # grant passes here and a read-only grant ALSO passes — the dispatch step itself remains
+      # the only true test of write. What this catches is the common failure: a PAT with no
+      # actions scope at all.
+      - name: The PAT can reach the chain target's workflows
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.chain }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+        run: |
+          set -euo pipefail
+          if ! gh api repos/ayers-software-repair/howland/actions/workflows --jq '.total_count' >/dev/null 2>&1; then
+            echo "::error::RELEASES_PAT has no actions scope on ayers-software-repair/howland."
+            echo "::error::The chain's last step dispatches that repo's server release and needs"
+            echo "::error::actions:write there (contents:write does not grant it). Either extend"
+            echo "::error::the PAT or dispatch with chain=false to run this link alone."
+            exit 1
+          fi
+          echo "actions scope present on the chain target (read proven; write is proven by the dispatch itself)."
+
   build-desktop:
     needs: preflight
     # Repo guard: this fork rebases onto upstream, and an unguarded release workflow on the

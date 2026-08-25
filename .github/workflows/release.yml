@@ -1,10 +1,18 @@
 name: Release Howland
 
-# ONE DISPATCH BUILDS EVERY HEAD. Desktop (six OS/arch legs) and mobile (Android, iOS) build from
-# this one workflow and publish onto the SAME howland-v<version> release, the way Neptune's
-# release.yml already does. Howland was the only product split across separate desktop and mobile
-# workflows; that asymmetry is gone (owner ruling 2026-08-25). The server publishes onto the same
-# release from the howland repo — a different repo, so that stays its own workflow.
+# ONE DISPATCH BUILDS EVERY HEAD THE RELEASE PAGE CARRIES. Desktop (six OS/arch legs) and Android
+# build from this one workflow and publish onto the SAME howland-v<version> release, the way
+# Neptune's release.yml does. Howland was split across separate desktop and mobile workflows; that
+# asymmetry is gone (owner ruling 2026-08-25). The server publishes onto the same release from the
+# howland repo — a different repo, so that stays its own workflow.
+#
+# iOS IS NOT HERE, and that is the same rule stated the other way round. The .ipa is not a release
+# asset — App Store Connect is its channel, and an .ipa on a release page installs for nobody — so
+# iOS is not one of the heads this ruling covers. Paying a ten-times-billed macOS archive on every
+# 1.0.0 rebuild for output that never touches the release is the waste the cost discipline
+# forbids, and store submission is not a per-rebuild cadence: you submit when there is something
+# to submit, and review takes days. It lives in ios-submission.yml, dispatch only (owner ruling
+# 2026-08-25).
 #
 # THE RELEASE PUBLISHES WHAT IT CAN SIGN, AND SAYS WHAT IT COULD NOT. Owner design: "as we sign,
 # the releases appear, instead of failing." A missing Apple certificate must not stop the Linux
@@ -655,273 +663,11 @@ jobs:
         with:
           name: mobile-android
           path: mobile-artifacts/*
-
-  build-ios:
-    needs: preflight
-    if: github.repository == 'ayers-software-repair/openwork'
-    runs-on: macos-latest
-    timeout-minutes: 60
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      # The iOS leg owes the release NOTHING: the .ipa is never a release asset (it goes to App
-      # Store Connect, and an .ipa on a release page is not installable by a normal person). So
-      # it writes no skip records — there is no expected asset for it to explain.
-      #
-      # It still gates on the certificate, and the reason is cost: macos-latest bills at 10x, and
-      # an archive nobody can export is ten-times-billed minutes for nothing.
-      - name: Decide whether this leg can ship
-        env:
-          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
-          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          missing=""
-          for v in APPLE_CERT_P12_BASE64 APPLE_PROVISIONING_PROFILE_BASE64 APPLE_TEAM_ID; do
-            eval "val=\${$v:-}"
-            [ -n "$val" ] || missing="${missing:+$missing and }$v"
-          done
-          if [ -n "$missing" ]; then
-            echo "CAN_SHIP=false" >> "$GITHUB_ENV"
-            echo "iOS is not building: no $missing. Nothing is owed to the release; the .ipa goes to App Store Connect."
-          else
-            echo "CAN_SHIP=true" >> "$GITHUB_ENV"
-            echo "iOS signing secrets present."
-          fi
-
-
-      # Same stamp the Android leg writes into build.gradle: display version from the tag
-      # (locked 1.0.0), build number from the run - store build codes must increase.
-      - name: Compute stamp version
-        if: ${{ env.CAN_SHIP == 'true' }}
-        env:
-          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-        run: |
-          set -euo pipefail
-          VERSION=$(echo "$RAW_TAG" | sed -E 's/^(howland-(mobile-)?)?v?//')
-          case "$VERSION" in *[!0-9.]*|"") VERSION=1.0.0 ;; esac
-          echo "STAMP_VERSION=$VERSION" >> "$GITHUB_ENV"
-
-      - name: Setup pnpm
-        if: ${{ env.CAN_SHIP == 'true' }}
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11.4.0
-
-      - name: Setup Node
-        if: ${{ env.CAN_SHIP == 'true' }}
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Install workspace deps
-        if: ${{ env.CAN_SHIP == 'true' }}
-        run: pnpm install --frozen-lockfile
-
-      - name: Build web bundle (apps/app)
-        if: ${{ env.CAN_SHIP == 'true' }}
-        env:
-          VITE_OPENWORK_POSTHOG_KEY: ""
-        run: pnpm --filter @openwork/app run build:web
-
-      - name: Stage web bundle into mobile/dist
-        if: ${{ env.CAN_SHIP == 'true' }}
-        run: |
-          rm -rf mobile/dist
-          mkdir -p mobile/dist
-          cp -R apps/app/dist/. mobile/dist/
-
-      - name: Install Capacitor deps
-        if: ${{ env.CAN_SHIP == 'true' }}
-        working-directory: mobile
-        run: npm ci
-
-      - name: Add + sync iOS platform
-        if: ${{ env.CAN_SHIP == 'true' }}
-        working-directory: mobile
-        run: |
-          if [ ! -d ios ]; then npx cap add ios; fi
-          npx cap sync ios
-
-      # Same self-hosted reality on iOS, but scoped narrowly rather than via the ATS kill
-      # switch -- see the step's inline comments for exactly what each key covers and why.
-      - name: Allow self-hosted http servers (iOS ATS)
-        if: ${{ env.CAN_SHIP == 'true' }}
-        working-directory: mobile
-        run: |
-          P=ios/App/App/Info.plist
-          # Howland servers are self-hosted on the user's LAN, tailnet, or reachable by an
-          # mDNS ".local" name, and speak plain http (no cert). Per Apple DTS
-          # (developer.apple.com/forums/thread/66417): "[NSAllowsLocalNetworking] has no
-          # effect on IP address loads (http://192.168.1.39/). On iOS 10 and later such loads
-          # are always allowed." -- so literal LAN IPs (10.x/172.16-31.x/192.168.x) and literal
-          # tailnet IPs (100.64.0.0/10) already work with NO ATS exception at all; ATS simply
-          # doesn't apply to numeric IP literals. What DOES need an exception is unqualified
-          # bare hostnames (http://myhowland/) and ".local" mDNS hostnames
-          # (http://myhowland.local/) -- that's exactly what NSAllowsLocalNetworking covers.
-          #
-          # Deliberately NOT NSAllowsArbitraryLoads: that key disables ATS for every host the
-          # app ever talks to, including the public internet, and is the specific blanket
-          # pattern App Store review flags and requires a (frequently rejected) written
-          # justification for. NSAllowsLocalNetworking covers this app's actual connection
-          # patterns (LAN IP, tailnet IP, .local) without that blast radius. Do not swap this
-          # back to NSAllowsArbitraryLoads to "simplify" it -- it would reopen that review risk
-          # for zero functional gain.
-          #
-          # NOT covered by NSAllowsLocalNetworking (nor by the IP exemption above): plain-http
-          # to a public FQDN (e.g. a dyndns hostname) or a Tailscale MagicDNS name
-          # (foo.tailnet-name.ts.net) -- both are real dotted hostnames, not "local" by ATS's
-          # definition, so ATS would still block them. Add an NSExceptionDomains entry here
-          # if/when such a pattern is actually supported.
-          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity' "$P" >/dev/null 2>&1 || \
-            /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity dict' "$P"
-          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity:NSAllowsLocalNetworking' "$P" >/dev/null 2>&1 || \
-            /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true' "$P"
-          # Defensive: remove the blanket kill switch if anything (a previous run, a merge, a
-          # future "helpful" edit) left it in place, so the two are never both set at once.
-          /usr/libexec/PlistBuddy -c 'Delete :NSAppTransportSecurity:NSAllowsArbitraryLoads' "$P" >/dev/null 2>&1 || true
-          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity' "$P"
-
-      # Local Network Privacy is a SEPARATE iOS gate from ATS (see Apple TN3179): it controls
-      # whether the app can open a connection to a local-network destination at all (LAN IP or
-      # .local host -- Apple's Local Network Privacy FAQ excludes VPN-type interfaces from its
-      # definition of "local network", which is why this is believed to NOT gate Tailscale
-      # traffic, since Tailscale presents to iOS as a VPN/tunnel interface; not verified
-      # on-device). Without NSLocalNetworkUsageDescription present, iOS never shows the "Allow
-      # Howland to find and connect to devices on your local network?" permission prompt and
-      # the connection just fails (NSURLErrorNotConnectedToInternet -- a transport error, not
-      # the TLS error ATS misconfiguration produces). This key was entirely absent before, so
-      # LAN/.local connections would have failed regardless of the ATS settings above.
-      - name: Declare local network usage (iOS)
-        if: ${{ env.CAN_SHIP == 'true' }}
-        working-directory: mobile
-        run: |
-          P=ios/App/App/Info.plist
-          /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$P" >/dev/null 2>&1 || \
-            /usr/libexec/PlistBuddy -c 'Add :NSLocalNetworkUsageDescription string "Howland connects to your self-hosted Howland server on your local network."' "$P"
-          /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$P"
-
-      - name: Install CocoaPods dependencies
-        if: ${{ env.CAN_SHIP == 'true' }}
-        working-directory: mobile/ios/App
-        run: pod install
-
-      # Import the distribution certificate into a temporary keychain and install the
-      # provisioning profile. The profile NAME is derived from the decoded profile itself, so no
-      # separate APPLE_PROVISIONING_PROFILE_NAME secret is required.
-      - name: Setup iOS signing
-        if: ${{ env.CAN_SHIP == 'true' }}
-        env:
-          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
-          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
-        run: |
-          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
-          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-
-          echo "$APPLE_CERT_P12_BASE64" | base64 --decode -o "$CERTIFICATE_PATH"
-          echo "$APPLE_PROVISIONING_PROFILE_BASE64" | base64 --decode -o "$PP_PATH"
-
-          security create-keychain -p actions "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p actions "$KEYCHAIN_PATH"
-
-          security import "$CERTIFICATE_PATH" -P "$APPLE_CERT_PASSWORD" -t cert -f pkcs12 -k "$KEYCHAIN_PATH" -T /usr/bin/codesign
-          # Without the partition-list stamp, codesign under xcodebuild hits a UI keychain
-          # prompt no CI runner can answer.
-          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          cp "$PP_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/"
-
-          # Derive the provisioning profile name from the profile file itself.
-          PROFILE_NAME=$(security cms -D -i "$PP_PATH" | plutil -extract Name raw -)
-          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
-          echo "Using provisioning profile: $PROFILE_NAME"
-
-      - name: Build iOS archive (signed)
-        if: ${{ env.CAN_SHIP == 'true' }}
-        working-directory: mobile/ios/App
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          xcodebuild -workspace App.xcworkspace \
-            -scheme App \
-            -sdk iphoneos \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/App.xcarchive" \
-            archive \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            PRODUCT_BUNDLE_IDENTIFIER=com.howland.app \
-            MARKETING_VERSION="$STAMP_VERSION" \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME"
-
-      - name: Export IPA (signed)
-        if: ${{ env.CAN_SHIP == 'true' }}
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          # method defaults to app-store. For direct device sideloading change it (and use a
-          # matching provisioning profile) to ad-hoc or development.
-          cat > "$RUNNER_TEMP/ExportOptions.plist" << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store</string>
-            <key>teamID</key>
-            <string>${APPLE_TEAM_ID}</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>signingCertificate</key>
-            <string>Apple Distribution</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>com.howland.app</key>
-              <string>${PROFILE_NAME}</string>
-            </dict>
-            <key>uploadBitcode</key>
-            <false/>
-            <key>compileBitcode</key>
-            <false/>
-            <key>uploadSymbols</key>
-            <true/>
-          </dict>
-          </plist>
-          EOF
-
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/App.xcarchive" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
-            -exportPath "$RUNNER_TEMP/build"
-
-      - name: Stage the iOS archive for App Store Connect
-        if: ${{ env.CAN_SHIP == 'true' }}
-        run: |
-          mkdir -p mobile-artifacts-ios
-          cp "$RUNNER_TEMP"/build/*.ipa mobile-artifacts-ios/Howland-Client-iOS-arm64.ipa
-          ls -la mobile-artifacts-ios
-
-      - name: Upload iOS artifact
-        if: ${{ env.CAN_SHIP == 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: mobile-ios
-          path: mobile-artifacts-ios/*
-
   release:
     # Every head, one publish. `always()` because a leg that could not sign still ends green and
     # a leg that FAILED must not silently take the publish with it — the reconciliation below is
     # what decides whether this run is a release or an error.
-    needs: [build-desktop, build-android, build-ios]
+    needs: [build-desktop, build-android]
     if: ${{ always() && github.repository == 'ayers-software-repair/openwork' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

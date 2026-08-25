@@ -114,7 +114,7 @@ declare global {
           feedUrl: string;
           currentVersion: string;
         }>;
-        check?: (channel?: "stable" | "alpha") => Promise<{
+        check?: (channel?: "stable" | "alpha", manual?: boolean) => Promise<{
           available: boolean;
           currentVersion?: string;
           latestVersion?: string | null;

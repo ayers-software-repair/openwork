@@ -179,7 +179,10 @@ export function useElectronUpdaterState(options: UseElectronUpdaterStateOptions)
     }
   }, [desktopConfig, releaseChannel, setError]);
 
-  const checkForUpdates = useCallback(async (channelOverride?: ReleaseChannel) => {
+  // manual defaults true: every caller here is a user action except the check-on-launch
+  // effect below, which passes false so the main process can suppress it when the
+  // auto-update preference is off.
+  const checkForUpdates = useCallback(async (channelOverride?: ReleaseChannel, manual = true) => {
     const activeReleaseChannel = channelOverride ?? releaseChannel;
     const bridge = electronUpdaterBridge();
     if (!bridge?.check) {
@@ -191,7 +194,7 @@ export function useElectronUpdaterState(options: UseElectronUpdaterStateOptions)
 
     setUpdateStatus({ state: "checking" });
     try {
-      const result = await bridge.check(activeReleaseChannel);
+      const result = await bridge.check(activeReleaseChannel, manual);
       dispatchEnvState({ type: "app-version", appVersion: result.currentVersion ?? null });
       if (result.channel && result.channel !== releaseChannel) {
         onReleaseChannelChange(result.channel);
@@ -243,7 +246,7 @@ export function useElectronUpdaterState(options: UseElectronUpdaterStateOptions)
     const key = `${releaseChannel}:${appVersion ?? "unknown"}`;
     if (autoCheckKeyRef.current === key) return;
     autoCheckKeyRef.current = key;
-    void checkForUpdates();
+    void checkForUpdates(undefined, false);
   }, [appVersion, checkForUpdates, releaseChannel, updateAutoCheck, updateEnv?.supported]);
 
   // Run a check when the native "Check for Updates..." menu item was used.

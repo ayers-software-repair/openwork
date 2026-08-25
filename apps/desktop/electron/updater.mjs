@@ -358,16 +358,33 @@ export function registerUpdaterIpc({ app, ipcMain, getMainWindow }) {
     return { autoUpdate: value };
   });
 
-  ipcMain.handle("openwork:updater:check", async (_event, rawChannel) => {
+  // manual defaults TRUE: every existing call site is a user action (the Settings button,
+  // the native Check for Updates menu item, a channel change). Only the renderer's
+  // check-on-launch effect passes false, and that is the one the preference may suppress.
+  ipcMain.handle("openwork:updater:check", async (_event, rawChannel, manual = true) => {
     if (rawChannel !== undefined) {
       await writeElectronUpdaterChannel(app, rawChannel);
+    }
+    const autoUpdate = await readAutoUpdate(app);
+    // The gate lives HERE, in the process that makes the outbound request — the renderer
+    // gates its own effect too, but the published disclosure ("turning it off stops the
+    // checks") is a claim about network behaviour, so it is enforced where the network is.
+    // A user-initiated check is never suppressed; that is what keeps opt-out from being a
+    // dead end (owner ruling 2026-08-24).
+    if (!manual && !autoUpdate) {
+      return {
+        available: false,
+        reason: "auto-update-off",
+        currentVersion: resolveAppVersion(app),
+        ...updaterChannelState(app, await readElectronUpdaterChannel(app)),
+      };
     }
     const updater = await ensureAutoUpdater();
     const channelState = updater
       ? await applyElectronUpdaterFeed(app, updater)
       : updaterChannelState(app, await readElectronUpdaterChannel(app));
     if (!updater) return { available: false, reason: "unavailable", ...channelState };
-    updater.autoInstallOnAppQuit = await readAutoUpdate(app);
+    updater.autoInstallOnAppQuit = autoUpdate;
     try {
       const result = await updater.checkForUpdates();
       const info = result?.updateInfo ?? null;

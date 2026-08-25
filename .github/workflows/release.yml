@@ -645,6 +645,16 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      # The app icon. Without this the generated native project ships CAPACITOR'S STOCK icon —
+      # a default-toolkit mark on a store listing (the brand audit's finding). The assets are
+      # interim renders of the current parrot (mobile/assets/); the brand pipeline's output
+      # replaces them on mark approval.
+      - name: Generate the Android app icons
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile
+        run: npx @capacitor/assets generate --android --iconBackgroundColor '#0a1628' --iconBackgroundColorDark '#0a1628'
+
+
       # Real version stamping: without it every APK/AAB ships Capacitor's default 1.0 /
       # versionCode 1 and Play rejects re-uploads. Display version comes from the tag
       # (locked 1.0.0 until production); versionCode is the run number because store build

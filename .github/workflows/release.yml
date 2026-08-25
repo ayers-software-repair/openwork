@@ -235,6 +235,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          # pnpm's store, keyed on pnpm-lock.yaml. 1828 resolved packages install from scratch on
+          # every leg otherwise, six times over on the desktop matrix. setup-node's own cache is
+          # used rather than actions/cache because it needs no key management and pnpm is already
+          # installed by the step above — which is the required order, not a coincidence.
+          cache: pnpm
 
       - name: Setup Bun
         if: ${{ env.CAN_SHIP == 'true' }}
@@ -499,6 +504,11 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          # pnpm's store, keyed on pnpm-lock.yaml. 1828 resolved packages install from scratch on
+          # every leg otherwise, six times over on the desktop matrix. setup-node's own cache is
+          # used rather than actions/cache because it needs no key management and pnpm is already
+          # installed by the step above — which is the required order, not a coincidence.
+          cache: pnpm
 
       - name: Setup Java
         if: ${{ env.CAN_SHIP == 'true' }}

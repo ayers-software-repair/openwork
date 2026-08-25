@@ -103,6 +103,9 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+          # See release.yml: pnpm's store keyed on the lockfile. This leg is on macos-latest at
+          # 10x, so the install it skips is the most expensive one in the estate.
+          cache: pnpm
 
       - name: Install workspace deps
         run: pnpm install --frozen-lockfile

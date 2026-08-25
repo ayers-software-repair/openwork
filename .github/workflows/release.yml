@@ -241,12 +241,12 @@ jobs:
           import re, sys
           src = sys.argv[1]
           stable = {
-            "macos":         {"zip": "Howland-macOS.zip",        "dmg": "Howland-macOS.dmg"},
-            "macos-intel":   {"zip": "Howland-macOS-Intel.zip",  "dmg": "Howland-macOS-Intel.dmg"},
-            "windows":       {"exe": "Howland-Windows.exe"},
-            "windows-arm64": {"exe": "Howland-Windows-arm64.exe"},
-            "linux":         {"AppImage": "Howland-Linux.AppImage"},
-            "linux-arm64":   {"AppImage": "Howland-Linux-arm64.AppImage"},
+            "macos":         {"zip": "Howland-Desktop-macOS-arm64.zip", "dmg": "Howland-Desktop-macOS-arm64.dmg"},
+            "macos-intel":   {"zip": "Howland-Desktop-macOS-x64.zip",   "dmg": "Howland-Desktop-macOS-x64.dmg"},
+            "windows":       {"exe": "Howland-Desktop-Windows-x64.exe"},
+            "windows-arm64": {"exe": "Howland-Desktop-Windows-arm64.exe"},
+            "linux":         {"AppImage": "Howland-Desktop-Linux-x64.AppImage"},
+            "linux-arm64":   {"AppImage": "Howland-Desktop-Linux-arm64.AppImage"},
           }["${{ matrix.artifact }}"]
           text = open(src).read()
           def sub(m):
@@ -312,14 +312,18 @@ jobs:
           }
           # Two mac architectures build now, so the globs are arch-specific (artifactName
           # renders howland-mac-arm64-* and howland-mac-x64-*).
-          cp "$(pick '*mac-arm64*.dmg')"         release/Howland-macOS.dmg
-          cp "$(pick '*mac-arm64*.zip')"         release/Howland-macOS.zip
-          cp "$(pick '*mac-x64*.dmg')"           release/Howland-macOS-Intel.dmg
-          cp "$(pick '*mac-x64*.zip')"           release/Howland-macOS-Intel.zip
-          cp "$(pick '*win-x64*.exe')"           release/Howland-Windows.exe
-          cp "$(pick '*win-arm64*.exe')"         release/Howland-Windows-arm64.exe
-          cp "$(pick '*linux-x86_64*.AppImage')" release/Howland-Linux.AppImage
-          cp "$(pick '*linux-x64*.tar.gz')"      release/Howland-Linux.tar.gz
+          # Grammar: <Product>-<Component>-<Platform>-<Arch>.<ext>, arch ALWAYS explicit
+          # (agreed with neptune, owner ruling 2026-08-24). The .zip pair is the
+          # electron-updater PAYLOAD on macOS — Squirrel cannot apply a dmg — and is never
+          # offered as a download; the .tar.gz pair is dropped entirely (a zip by another
+          # name, which the owner ruled against).
+          cp "$(pick '*mac-arm64*.dmg')"         release/Howland-Desktop-macOS-arm64.dmg
+          cp "$(pick '*mac-arm64*.zip')"         release/Howland-Desktop-macOS-arm64.zip
+          cp "$(pick '*mac-x64*.dmg')"           release/Howland-Desktop-macOS-x64.dmg
+          cp "$(pick '*mac-x64*.zip')"           release/Howland-Desktop-macOS-x64.zip
+          cp "$(pick '*win-x64*.exe')"           release/Howland-Desktop-Windows-x64.exe
+          cp "$(pick '*win-arm64*.exe')"         release/Howland-Desktop-Windows-arm64.exe
+          cp "$(pick '*linux-x86_64*.AppImage')" release/Howland-Desktop-Linux-x64.AppImage
           # ${arch} in artifactName is not one token across Linux targets. From electron-builder's
           # own getArtifactArchName(arch, ext) in builder-util:
           #   AppImage  x64 -> x86_64   arm64 -> arm64
@@ -328,17 +332,38 @@ jobs:
           # The .deb glob used to be a bare '*.deb' on the grounds that only one Linux leg existed.
           # Two do now, so it is arch-specific — a bare glob would have picked whichever the
           # filesystem returned first and could have published an arm64 package under the x64 name.
-          cp "$(pick '*linux-amd64*.deb')"       release/Howland-Linux.deb
-          cp "$(pick '*linux-arm64*.AppImage')"  release/Howland-Linux-arm64.AppImage
-          cp "$(pick '*linux-arm64*.tar.gz')"    release/Howland-Linux-arm64.tar.gz
-          cp "$(pick '*linux-arm64*.deb')"       release/Howland-Linux-arm64.deb
+          cp "$(pick '*linux-amd64*.deb')"       release/Howland-Desktop-Linux-x64.deb
+          cp "$(pick '*linux-arm64*.AppImage')"  release/Howland-Desktop-Linux-arm64.AppImage
+          cp "$(pick '*linux-arm64*.deb')"       release/Howland-Desktop-Linux-arm64.deb
           # The six per-platform+arch updater metadata files ride the same release; each leg
           # produced exactly one, uniquely named.
           find artifacts -name 'latest*.yml' -exec cp {} release/ \;
           YMLS=$(find release -maxdepth 1 -name 'latest*.yml' | wc -l)
           if [ "$YMLS" -ne 6 ]; then echo "::error::expected 6 updater metadata files, found $YMLS"; exit 1; fi
-          # Integrity: checksums published next to the binaries (sha256sum -c SHA256SUMS-desktop.txt).
-          ( cd release && sha256sum Howland-* > SHA256SUMS-desktop.txt )
+          # The metadata files EXIST is not the same as the metadata being CORRECT. Every
+          # url: inside them must name a file that actually ships in this release: a stale
+          # entry (an asset rename that missed the rewrite table, say) publishes green,
+          # passes the release-preflight liveness sweep — which only checks the yml itself
+          # resolves — and then 404s on every user's auto-update forever, because the
+          # recorded sha512 and size stay valid and only the NAME is wrong.
+          MISSING=0
+          for yml in release/latest*.yml; do
+            while IFS= read -r ref; do
+              [ -n "$ref" ] || continue
+              if [ ! -f "release/$ref" ]; then
+                echo "::error::$yml points at $ref, which is not in this release"
+                MISSING=$((MISSING+1))
+              fi
+            done <<EOF
+          $(grep -oE '^[[:space:]]*(-[[:space:]]*)?url:[[:space:]]*[^[:space:]]+' "$yml" | awk '{print $NF}')
+          EOF
+          done
+          if [ "$MISSING" -ne 0 ]; then exit 1; fi
+          # Integrity: checksums published next to the binaries
+          # (sha256sum -c Howland-Desktop-CHECKSUMS.txt). Explicit glob, and the manifest is
+          # written last so it cannot describe itself.
+          ( cd release && sha256sum Howland-Desktop-*.dmg Howland-Desktop-*.zip Howland-Desktop-*.exe \
+              Howland-Desktop-*.AppImage Howland-Desktop-*.deb > Howland-Desktop-CHECKSUMS.txt )
           echo "Stable-named installers:"; ls -la release
 
       # Clean product version from the tag (howland-v1.0.0 -> 1.0.0), normalized EXACTLY like

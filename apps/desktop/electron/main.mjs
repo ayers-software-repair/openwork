@@ -207,9 +207,10 @@ function archLabel(arch) {
 
 
 function howlandAssetName(arch) {
-  if (process.platform === "darwin") return arch === "arm64" ? "Howland-macOS.dmg" : "Howland-macOS-Intel.dmg";
-  if (process.platform === "win32") return arch === "arm64" ? "Howland-Windows-arm64.exe" : "Howland-Windows.exe";
-  return arch === "arm64" ? "Howland-Linux-arm64.AppImage" : "Howland-Linux.AppImage";
+  const a = arch === "arm64" ? "arm64" : "x64";
+  if (process.platform === "darwin") return `Howland-Desktop-macOS-${a}.dmg`;
+  if (process.platform === "win32") return `Howland-Desktop-Windows-${a}.exe`;
+  return `Howland-Desktop-Linux-${a}.AppImage`;
 }
 
 async function resolveCorrectArchitectureDownloadUrl(arch) {

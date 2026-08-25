@@ -47,11 +47,11 @@ const config: CapacitorConfig = {
     // `cap sync` (capacitor.config.ts runs before those native projects exist, so it cannot
     // set OS-level network policy itself):
     //   - Android: android/app/src/main/res/xml/network_security_config.xml, referenced via
-    //     android:networkSecurityConfig -- see mobile-release.yml step "Allow self-hosted
+    //     android:networkSecurityConfig -- see release.yml step "Allow self-hosted
     //     http servers (Android)".
     //   - iOS: Info.plist NSAppTransportSecurity -> NSAllowsLocalNetworking (deliberately NOT
     //     NSAllowsArbitraryLoads, the app-wide ATS kill switch App Store review flags) plus
-    //     NSLocalNetworkUsageDescription -- see mobile-release.yml steps "Allow self-hosted
+    //     NSLocalNetworkUsageDescription -- see ios-submission.yml steps "Allow self-hosted
     //     http servers (iOS ATS)" and "Declare local network usage (iOS)".
     // Leaving this `cleartext: true` does not widen those exceptions; it only lets the
     // Android WebView issue the request in the first place, which the config above then

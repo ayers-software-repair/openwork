@@ -1,10 +1,31 @@
-name: Release Howland Desktop
+name: Release Howland
 
-# Tag-driven release: pushing a howland-v* tag builds every desktop OS and
-# publishes one GitHub Release carrying the Howland-branded installers. Same build
-# steps as build-electron-desktop.yml; branding is build-time only so electron-builder.yml
-# stays untouched and upstream still merges. Signing is intentionally absent (unsigned now);
-# when signing secrets exist they slot into the package step without changing this shape.
+# ONE DISPATCH BUILDS EVERY HEAD. Desktop (six OS/arch legs) and mobile (Android, iOS) build from
+# this one workflow and publish onto the SAME howland-v<version> release, the way Neptune's
+# release.yml already does. Howland was the only product split across separate desktop and mobile
+# workflows; that asymmetry is gone (owner ruling 2026-08-25). The server publishes onto the same
+# release from the howland repo — a different repo, so that stays its own workflow.
+#
+# THE RELEASE PUBLISHES WHAT IT CAN SIGN, AND SAYS WHAT IT COULD NOT. Owner design: "as we sign,
+# the releases appear, instead of failing." A missing Apple certificate must not stop the Linux
+# and Windows installers from shipping. So a leg with no certificate SKIPS — but never quietly:
+#
+#   1. Every expected asset that did not publish is named in the RUN SUMMARY with its reason and
+#      the SECRET that would fix it. A green run that built nothing must never look like a green
+#      run that built everything.
+#   2. The run stays GREEN. Doing what it could with what it had is success.
+#   3. An asset that was BUILT and then went missing is a HARD FAILURE. "We had no cert" and "we
+#      had the file and lost it" are different, and the release job can tell them apart because a
+#      skipping leg leaves a REASON RECORD and a broken one leaves nothing.
+#
+# There is no unsigned proof mode. A leg either signs and publishes, or explains itself.
+#
+# CHAIN: the sidecar release on the opencode fork MUST exist before this runs. openwork's
+# constants.json pins the sidecar version and prepare-sidecar.mjs exits 1 on a missing asset, so
+# one dead fetch blocks every desktop leg. See the fork's howland-sidecar.yml.
+#
+# Branding is build-time only (electron-builder `-c` overrides), so electron-builder.yml stays
+# untouched and upstream still merges.
 
 on:
   push:
@@ -21,7 +42,78 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  # PREFLIGHT. Nothing perishable is discovered on a ten-times-billed runner.
+  #
+  # The sidecar is the real hazard here: prepare-sidecar.mjs exits 1 on a missing asset, and the
+  # sidecar lives in ANOTHER repo on a version pinned by constants.json. Without this job, a
+  # sidecar release that was never cut is found six times over — once per desktop leg, two of them
+  # macOS — and every one of those minutes is billed for nothing. Checking it costs one ubuntu
+  # minute and it fails the run before any of that is spent.
+  #
+  # It checks EXISTENCE AND NAMES. A release that exists but carries differently-named assets
+  # fails a build leg exactly as hard as one that does not exist, and the names are the part that
+  # drifts (see the asset table in prepare-sidecar.mjs).
+  preflight:
+    if: github.repository == 'ayers-software-repair/openwork'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: The pinned sidecar release exists, with every asset the legs will ask for
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c "import json;print(json.load(open('constants.json'))['opencodeVersion'])")
+          REPO=ayers-software-repair/opencode
+          echo "Sidecar pin: $REPO@$VERSION"
+          if ! gh release view "$VERSION" --repo "$REPO" --json tagName >/dev/null 2>&1; then
+            echo "::error::sidecar release $VERSION does not exist on $REPO."
+            echo "::error::Run the fork's howland-sidecar.yml first — every desktop leg fetches from it."
+            exit 1
+          fi
+          have=$(gh release view "$VERSION" --repo "$REPO" --json assets -q '.assets[].name')
+          missing=""
+          # The six names prepare-sidecar.mjs resolves by target triple. Kept in step with the
+          # OPENCODE_ASSETS table there; a rename in either place fails here rather than mid-build.
+          for a in opencode-darwin-arm64.zip opencode-darwin-x64-baseline.zip \
+                   opencode-linux-x64-baseline.tar.gz opencode-linux-arm64.tar.gz \
+                   opencode-windows-x64-baseline.zip opencode-windows-arm64.zip; do
+            printf '%s\n' "$have" | grep -qx "$a" || missing="$missing $a"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::sidecar release $VERSION is missing:$missing"
+            echo "available:"; printf '%s\n' "$have"
+            exit 1
+          fi
+          echo "Sidecar release $VERSION carries all six assets."
+
+      # The publish happens at the very END of a long run. A PAT that cannot write is worth
+      # discovering in minute one, not after every runner has been paid for.
+      - name: The releases PAT can write to the releases repo
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::RELEASES_PAT is not set on this repo; the publish step would fail after every build."
+            exit 1
+          fi
+          perms=$(gh api repos/ayers-software-repair/howland-releases --jq '.permissions.push') || {
+            echo "::error::RELEASES_PAT cannot read ayers-software-repair/howland-releases."
+            exit 1
+          }
+          if [ "$perms" != "true" ]; then
+            echo "::error::RELEASES_PAT has no WRITE access to howland-releases (push=$perms)."
+            echo "::error::Read access is not enough — a read-only token passes a liveness check and fails the publish."
+            exit 1
+          fi
+          echo "RELEASES_PAT has write access."
+
+  build-desktop:
+    needs: preflight
     # Repo guard: this fork rebases onto upstream, and an unguarded release workflow on the
     # wrong clone is a live publish path. The guard also keeps a future upstream-merged copy
     # inert anywhere but here.
@@ -53,10 +145,11 @@ jobs:
     # A hung leg would otherwise burn the 360-minute default; notarization can add 5-20 min.
     timeout-minutes: 60
 
-    # Soft-fail signing gates. The secrets context is NOT allowed in an `if:` (it fails the
-    # whole run at parse time), so derive plain booleans here and gate steps on env — the
-    # same pattern as the howland repo's server-release.yml. Secrets absent => every signing
-    # step skips => byte-for-byte today's unsigned build.
+    # Signing gates. The secrets context is NOT allowed in a job-level `if:` (it fails the whole
+    # run at parse time with zero jobs), so derive plain booleans here and gate STEPS on env.
+    # A false boolean means this leg publishes nothing and records WHY — see "Record what this
+    # leg could not sign" at the end of the job. The leg still ends green; the release job is
+    # what turns those records into the visible list.
     env:
       MAC_SIGN: ${{ secrets.APPLE_DESKTOP_CERT_P12_BASE64 != '' }}
       MAC_NOTARIZE: ${{ secrets.APPLE_DESKTOP_CERT_P12_BASE64 != '' && secrets.APPLE_NOTARY_KEY_P8 != '' }}
@@ -66,22 +159,83 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Can this leg ship? Decided ONCE, here, before anything expensive runs — a macOS leg with
+      # no certificate must not spend ten-times-billed minutes producing an installer Gatekeeper
+      # will refuse anyway. Linux needs no signing and always ships.
+      #
+      # A leg that cannot ship writes a REASON RECORD naming every asset it owes and the secret
+      # that would produce it. The release job turns those into the run summary. A leg that CAN
+      # ship writes nothing here — so if its assets are then missing, the absence is unexplained
+      # and the release job fails, which is exactly the difference between "no cert" and "we
+      # built it and lost it".
+      - name: Decide whether this leg can ship
+        shell: bash
+        run: |
+          set -euo pipefail
+          can=true; reason=""; owed=""
+          case "${{ matrix.artifact }}" in
+            macos)
+              owed="Howland-Desktop-macOS-arm64.dmg Howland-Desktop-macOS-arm64.zip latest-mac.yml" ;;
+            macos-intel)
+              owed="Howland-Desktop-macOS-x64.dmg Howland-Desktop-macOS-x64.zip latest-mac-x64.yml" ;;
+            windows)
+              owed="Howland-Desktop-Windows-x64.exe latest.yml" ;;
+            windows-arm64)
+              owed="Howland-Desktop-Windows-arm64.exe latest-arm64.yml" ;;
+            linux)
+              owed="Howland-Desktop-Linux-x64.AppImage Howland-Desktop-Linux-x64.deb latest-linux.yml" ;;
+            linux-arm64)
+              owed="Howland-Desktop-Linux-arm64.AppImage Howland-Desktop-Linux-arm64.deb latest-linux-arm64.yml" ;;
+          esac
+          case "${{ matrix.artifact }}" in
+            macos|macos-intel)
+              if [ "$MAC_SIGN" != "true" ]; then
+                can=false; reason="no APPLE_DESKTOP_CERT_P12_BASE64, so the macOS legs did not build"
+              elif [ "$MAC_NOTARIZE" != "true" ]; then
+                can=false; reason="no APPLE_NOTARY_KEY_P8, so the macOS legs did not build"
+              fi ;;
+            windows|windows-arm64)
+              if [ "$WIN_SIGN" != "true" ]; then
+                can=false; reason="no WINDOWS_CERT_PFX_BASE64, so the Windows legs did not build"
+              fi ;;
+          esac
+          echo "CAN_SHIP=$can" >> "$GITHUB_ENV"
+          if [ "$can" != "true" ]; then
+            mkdir -p skips
+            for a in $owed; do printf '%s\n' "$reason" > "skips/$a.txt"; done
+            echo "This leg is not shipping: $reason"
+            ls skips
+          else
+            echo "This leg can ship: $owed"
+          fi
+
+      - name: Upload skip records
+        if: ${{ env.CAN_SHIP != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: skips-${{ matrix.artifact }}
+          path: skips/*
+
       - name: Setup pnpm
+        if: ${{ env.CAN_SHIP == 'true' }}
         uses: pnpm/action-setup@v4
         with:
           version: 11.4.0
 
       - name: Setup Node
+        if: ${{ env.CAN_SHIP == 'true' }}
         uses: actions/setup-node@v6
         with:
           node-version: 24
 
       - name: Setup Bun
+        if: ${{ env.CAN_SHIP == 'true' }}
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
 
       - name: Install dependencies
+        if: ${{ env.CAN_SHIP == 'true' }}
         run: pnpm install --frozen-lockfile
 
       # --- macOS signing (soft-fail) --------------------------------------------------------
@@ -91,8 +245,8 @@ jobs:
       # createKeychain -> `security import` of a zero-byte p12 -> hard failure. So these vars
       # are exported HERE, inside a gated step, never at job level from possibly-empty
       # secrets. Heredoc form guards against line-wrapped base64 values.
-      - name: Enable macOS code signing (when cert secret present)
-        if: ${{ runner.os == 'macOS' && env.MAC_SIGN == 'true' }}
+      - name: Enable macOS code signing
+        if: ${{ env.CAN_SHIP == 'true' && runner.os == 'macOS' }}
         env:
           P12_B64: ${{ secrets.APPLE_DESKTOP_CERT_P12_BASE64 }}
           P12_PASS: ${{ secrets.APPLE_DESKTOP_CERT_PASSWORD }}
@@ -110,7 +264,7 @@ jobs:
       # .deb target cannot use it. USE_SYSTEM_FPM is app-builder's documented escape hatch;
       # a system Ruby fpm builds the same package. Pinned so the .deb metadata is stable.
       - name: System fpm for the arm64 .deb (app-builder ships no arm64 fpm)
-        if: ${{ matrix.os == 'ubuntu-24.04-arm' }}
+        if: ${{ env.CAN_SHIP == 'true' && matrix.os == 'ubuntu-24.04-arm' }}
         run: |
           set -euo pipefail
           sudo apt-get update -q
@@ -124,8 +278,8 @@ jobs:
       # and APPLE_API_ISSUER — the exact env set upstream's release-macos-aarch64.yml feeds
       # the same hook. Secret names reuse the howland repo's server-release.yml notary scheme
       # so ONE App Store Connect key is stored under the SAME names in both repos.
-      - name: Enable macOS notarization (when notary key present)
-        if: ${{ runner.os == 'macOS' && env.MAC_NOTARIZE == 'true' }}
+      - name: Enable macOS notarization
+        if: ${{ env.CAN_SHIP == 'true' && runner.os == 'macOS' }}
         env:
           NOTARY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
           NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
@@ -147,6 +301,7 @@ jobs:
       # electron-builder.yml linux.target list — see the comment there for why deb can't be
       # added purely via a `-c` override). Branding stays build-time-only via `-c`.
       - name: Package Electron desktop (Howland installers)
+        if: ${{ env.CAN_SHIP == 'true' }}
         shell: bash
         env:
           # Kill upstream analytics: an empty key disables PostHog in any build (the resolver
@@ -198,7 +353,7 @@ jobs:
       # (e.g. secrets.AZURE_TENANT_ID != ''). Nothing else moves: SHA256SUMS-desktop.txt is
       # computed in the release job AFTER this, so checksums always cover the signed bytes.
       - name: Sign the Windows installer (Authenticode)
-        if: ${{ runner.os == 'Windows' && env.WIN_SIGN == 'true' }}
+        if: ${{ env.CAN_SHIP == 'true' && runner.os == 'Windows' }}
         shell: pwsh
         env:
           PFX_B64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
@@ -224,6 +379,7 @@ jobs:
       # renames its metadata to the per-platform+arch channel file the app requests
       # (howlandUpdaterChannel in electron/updater.mjs — the two lists must match).
       - name: Stable-name the updater metadata
+        if: ${{ env.CAN_SHIP == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -260,6 +416,7 @@ jobs:
           rm -f latest*.yml.bak
 
       - name: Upload installers
+        if: ${{ env.CAN_SHIP == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: howland-${{ matrix.artifact }}
@@ -271,9 +428,501 @@ jobs:
             apps/desktop/dist-electron/*.exe
             apps/desktop/dist-electron/latest*.yml
 
-  release:
-    needs: build
+  build-android:
+    needs: preflight
     if: github.repository == 'ayers-software-repair/openwork'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # Uniform decide-and-record, identical in shape to the desktop legs and to Neptune's.
+      # No keystore means this leg publishes nothing and says which secret would change that;
+      # the run stays green and the release job renders the reason.
+      - name: Decide whether this leg can ship
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          # The checksum manifest rides with the binaries it describes: if they do not build,
+          # neither does it, for the same reason.
+          owed="Howland-Client-Android.apk Howland-Client-Android.aab Howland-Client-CHECKSUMS.txt"
+          missing=""
+          for v in ANDROID_KEYSTORE_BASE64 ANDROID_STORE_PASSWORD ANDROID_KEY_PASSWORD ANDROID_KEY_ALIAS; do
+            eval "val=\${$v:-}"
+            [ -n "$val" ] || missing="${missing:+$missing and }$v"
+          done
+          if [ -n "$missing" ]; then
+            echo "CAN_SHIP=false" >> "$GITHUB_ENV"
+            mkdir -p skips
+            for asset in $owed; do
+              printf 'no %s, so the Android leg did not build\n' "$missing" > "skips/$asset.txt"
+            done
+            echo "Android is not shipping: no $missing"
+          else
+            echo "CAN_SHIP=true" >> "$GITHUB_ENV"
+            echo "Android signing secrets present."
+          fi
+
+      - name: Upload skip records
+        if: ${{ env.CAN_SHIP != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: skips-android
+          path: skips/*
+
+
+      - name: Setup pnpm
+        if: ${{ env.CAN_SHIP == 'true' }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.4.0
+
+      - name: Setup Node
+        if: ${{ env.CAN_SHIP == 'true' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup Java
+        if: ${{ env.CAN_SHIP == 'true' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # ubuntu-latest ships the Android SDK + cmdline-tools with ANDROID_HOME / ANDROID_SDK_ROOT
+      # preset, which Gradle picks up. If a future runner image drops the SDK, add
+      # android-actions/setup-android here before the Gradle build.
+
+      - name: Install workspace deps
+        if: ${{ env.CAN_SHIP == 'true' }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web bundle (apps/app)
+        if: ${{ env.CAN_SHIP == 'true' }}
+        env:
+          VITE_OPENWORK_POSTHOG_KEY: ""
+        run: pnpm --filter @openwork/app run build:web
+
+      # Stage the web bundle where capacitor.config.ts expects it (webDir: dist).
+      - name: Stage web bundle into mobile/dist
+        if: ${{ env.CAN_SHIP == 'true' }}
+        run: |
+          rm -rf mobile/dist
+          mkdir -p mobile/dist
+          cp -R apps/app/dist/. mobile/dist/
+
+      # Standalone npm project (outside the pnpm workspace); package-lock.json is committed,
+      # so npm ci gives reproducible inputs.
+      - name: Install Capacitor deps
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile
+        run: npm ci
+
+      - name: Add + sync Android platform
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile
+        run: |
+          if [ ! -d android ]; then npx cap add android; fi
+          npx cap sync android
+
+      # Real version stamping: without it every APK/AAB ships Capacitor's default 1.0 /
+      # versionCode 1 and Play rejects re-uploads. Display version comes from the tag
+      # (locked 1.0.0 until production); versionCode is the run number because store build
+      # codes must INCREASE even when the display version does not (the rebuild loop).
+      - name: Stamp Android version
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION=$(echo "$RAW_TAG" | sed -E 's/^(howland-(mobile-)?)?v?//')
+          case "$VERSION" in *[!0-9.]*|"") VERSION=1.0.0 ;; esac
+          G=android/app/build.gradle
+          sed -i -E "s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" "$G"
+          sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/" "$G"
+          grep -E "versionName|versionCode" "$G"
+
+      # Howland servers are self-hosted and speak plain http on the user's LAN or tailnet, so
+      # the app needs cleartext permitted for those destinations -- but scoped, not app-wide.
+      # This installs a network_security_config.xml (see its own header comment for exactly
+      # what it covers, and the one hard platform limitation: Android's config format has no
+      # CIDR/IP-range syntax, so it cannot express "any private IP" the way iOS's
+      # NSAllowsLocalNetworking can) and references it from the manifest instead of the old
+      # blanket android:usesCleartextTraffic="true" flag on <application>.
+      - name: Allow self-hosted http servers (Android)
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          XML_DIR=android/app/src/main/res/xml
+          mkdir -p "$XML_DIR"
+          cat > "$XML_DIR/network_security_config.xml" << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <!--
+            Howland servers are self-hosted: the phone app connects to whatever address the
+            user gives it - a LAN IP (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), a
+            Tailscale/tailnet IP (100.64.0.0/10 CGNAT), or an mDNS ".local" hostname - and
+            that box has no TLS certificate, so cleartext (http) has to be permitted for it.
+            This file replaces the old app-wide android:usesCleartextTraffic="true" manifest
+            flag so the exception is scoped and auditable instead of implicit.
+
+            PLATFORM LIMITATION - read this before "simplifying" the file back to a blanket
+            flag: Android's Network Security Configuration matches by exact hostname, or by
+            exact literal IP address, with optional DNS-style subdomain wildcarding
+            (includeSubdomains) - see
+            https://developer.android.com/privacy-and-security/security-config. There is NO
+            CIDR / IP range syntax. A <domain> entry of "10.0.0.0/8" or "100.64.0.0/10" is not
+            valid: this format cannot express "any address in this private range" the way
+            iOS's NSAllowsLocalNetworking does (that key is a runtime OS check, not a static
+            list). Since the user's server IP is chosen at connect time and can't be
+            enumerated at build time, it cannot be pre-declared here. This is a confirmed
+            platform gap, not an oversight (see mobile-release.yml for the writeup).
+
+            Given that limitation, this config is split in two:
+              1. mDNS ".local" names are proper DNS domains, so they narrow correctly below
+                 via includeSubdomains - this is real, functioning scoping.
+              2. Literal LAN/tailnet IPs typed in by the user can't be pre-declared, so
+                 cleartext is permitted at the base-config level, same as the old manifest
+                 flag did. Moving it into this file does NOT, by itself, shrink which hosts
+                 cleartext is allowed to - do not read its presence as having already solved
+                 that. If this ever needs tightening further, it has to happen in application
+                 code (validate the destination actually resolves to a private/tailnet address
+                 before allowing a plaintext request - see the isPrivateAddress() guard in
+                 ee/apps/den-api/src/capability-sources/url-guard.ts for the equivalent check
+                 already used server-side), not in this XML: the format cannot do it.
+          -->
+          <network-security-config>
+              <domain-config cleartextTrafficPermitted="true">
+                  <domain includeSubdomains="true">local</domain>
+              </domain-config>
+              <base-config cleartextTrafficPermitted="true" />
+          </network-security-config>
+          EOF
+          python3 -c "import xml.dom.minidom as m; m.parse('$XML_DIR/network_security_config.xml'); print('network_security_config.xml is well-formed XML')"
+
+          # The generated manifest puts <application on its own line (attributes follow on the
+          # next lines), so match the bare tag, not "<application ".
+          if ! grep -q 'networkSecurityConfig' "$M"; then
+            sed -i 's/<application/<application android:networkSecurityConfig="@xml\/network_security_config"/' "$M"
+          fi
+          # Defensive: strip a bare usesCleartextTraffic="true" if anything (Capacitor itself,
+          # or a stray previous run) added it, so the app-wide flag and this scoped config file
+          # are never both in effect at once.
+          sed -i 's/ android:usesCleartextTraffic="true"//' "$M"
+          grep -o 'networkSecurityConfig="[^"]*"' "$M"
+
+      - name: Decode Android keystore
+        if: ${{ env.CAN_SHIP == 'true' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > mobile/android/upload.keystore
+
+      # Signed build. Signing is injected via Gradle properties (android.injected.signing.*) so
+      # we do not have to patch the cap-generated build.gradle. This signs both the APK and AAB.
+      - name: Build Android (signed APK + AAB)
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile/android
+        env:
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease bundleRelease \
+            -Pandroid.injected.signing.store.file="$PWD/upload.keystore" \
+            -Pandroid.injected.signing.store.password="$ANDROID_STORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
+
+      - name: Stage Android artifacts (stable names)
+        if: ${{ env.CAN_SHIP == 'true' }}
+        run: |
+          mkdir -p mobile-artifacts
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile-artifacts/Howland-Client-Android.apk
+          cp mobile/android/app/build/outputs/bundle/release/app-release.aab mobile-artifacts/Howland-Client-Android.aab
+          ls -la mobile-artifacts
+
+      - name: Upload Android artifacts
+        if: ${{ env.CAN_SHIP == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-android
+          path: mobile-artifacts/*
+
+  build-ios:
+    needs: preflight
+    if: github.repository == 'ayers-software-repair/openwork'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # The iOS leg owes the release NOTHING: the .ipa is never a release asset (it goes to App
+      # Store Connect, and an .ipa on a release page is not installable by a normal person). So
+      # it writes no skip records — there is no expected asset for it to explain.
+      #
+      # It still gates on the certificate, and the reason is cost: macos-latest bills at 10x, and
+      # an archive nobody can export is ten-times-billed minutes for nothing.
+      - name: Decide whether this leg can ship
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          missing=""
+          for v in APPLE_CERT_P12_BASE64 APPLE_PROVISIONING_PROFILE_BASE64 APPLE_TEAM_ID; do
+            eval "val=\${$v:-}"
+            [ -n "$val" ] || missing="${missing:+$missing and }$v"
+          done
+          if [ -n "$missing" ]; then
+            echo "CAN_SHIP=false" >> "$GITHUB_ENV"
+            echo "iOS is not building: no $missing. Nothing is owed to the release; the .ipa goes to App Store Connect."
+          else
+            echo "CAN_SHIP=true" >> "$GITHUB_ENV"
+            echo "iOS signing secrets present."
+          fi
+
+
+      # Same stamp the Android leg writes into build.gradle: display version from the tag
+      # (locked 1.0.0), build number from the run - store build codes must increase.
+      - name: Compute stamp version
+        if: ${{ env.CAN_SHIP == 'true' }}
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION=$(echo "$RAW_TAG" | sed -E 's/^(howland-(mobile-)?)?v?//')
+          case "$VERSION" in *[!0-9.]*|"") VERSION=1.0.0 ;; esac
+          echo "STAMP_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Setup pnpm
+        if: ${{ env.CAN_SHIP == 'true' }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.4.0
+
+      - name: Setup Node
+        if: ${{ env.CAN_SHIP == 'true' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install workspace deps
+        if: ${{ env.CAN_SHIP == 'true' }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web bundle (apps/app)
+        if: ${{ env.CAN_SHIP == 'true' }}
+        env:
+          VITE_OPENWORK_POSTHOG_KEY: ""
+        run: pnpm --filter @openwork/app run build:web
+
+      - name: Stage web bundle into mobile/dist
+        if: ${{ env.CAN_SHIP == 'true' }}
+        run: |
+          rm -rf mobile/dist
+          mkdir -p mobile/dist
+          cp -R apps/app/dist/. mobile/dist/
+
+      - name: Install Capacitor deps
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile
+        run: npm ci
+
+      - name: Add + sync iOS platform
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile
+        run: |
+          if [ ! -d ios ]; then npx cap add ios; fi
+          npx cap sync ios
+
+      # Same self-hosted reality on iOS, but scoped narrowly rather than via the ATS kill
+      # switch -- see the step's inline comments for exactly what each key covers and why.
+      - name: Allow self-hosted http servers (iOS ATS)
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile
+        run: |
+          P=ios/App/App/Info.plist
+          # Howland servers are self-hosted on the user's LAN, tailnet, or reachable by an
+          # mDNS ".local" name, and speak plain http (no cert). Per Apple DTS
+          # (developer.apple.com/forums/thread/66417): "[NSAllowsLocalNetworking] has no
+          # effect on IP address loads (http://192.168.1.39/). On iOS 10 and later such loads
+          # are always allowed." -- so literal LAN IPs (10.x/172.16-31.x/192.168.x) and literal
+          # tailnet IPs (100.64.0.0/10) already work with NO ATS exception at all; ATS simply
+          # doesn't apply to numeric IP literals. What DOES need an exception is unqualified
+          # bare hostnames (http://myhowland/) and ".local" mDNS hostnames
+          # (http://myhowland.local/) -- that's exactly what NSAllowsLocalNetworking covers.
+          #
+          # Deliberately NOT NSAllowsArbitraryLoads: that key disables ATS for every host the
+          # app ever talks to, including the public internet, and is the specific blanket
+          # pattern App Store review flags and requires a (frequently rejected) written
+          # justification for. NSAllowsLocalNetworking covers this app's actual connection
+          # patterns (LAN IP, tailnet IP, .local) without that blast radius. Do not swap this
+          # back to NSAllowsArbitraryLoads to "simplify" it -- it would reopen that review risk
+          # for zero functional gain.
+          #
+          # NOT covered by NSAllowsLocalNetworking (nor by the IP exemption above): plain-http
+          # to a public FQDN (e.g. a dyndns hostname) or a Tailscale MagicDNS name
+          # (foo.tailnet-name.ts.net) -- both are real dotted hostnames, not "local" by ATS's
+          # definition, so ATS would still block them. Add an NSExceptionDomains entry here
+          # if/when such a pattern is actually supported.
+          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity' "$P" >/dev/null 2>&1 || \
+            /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity dict' "$P"
+          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity:NSAllowsLocalNetworking' "$P" >/dev/null 2>&1 || \
+            /usr/libexec/PlistBuddy -c 'Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true' "$P"
+          # Defensive: remove the blanket kill switch if anything (a previous run, a merge, a
+          # future "helpful" edit) left it in place, so the two are never both set at once.
+          /usr/libexec/PlistBuddy -c 'Delete :NSAppTransportSecurity:NSAllowsArbitraryLoads' "$P" >/dev/null 2>&1 || true
+          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity' "$P"
+
+      # Local Network Privacy is a SEPARATE iOS gate from ATS (see Apple TN3179): it controls
+      # whether the app can open a connection to a local-network destination at all (LAN IP or
+      # .local host -- Apple's Local Network Privacy FAQ excludes VPN-type interfaces from its
+      # definition of "local network", which is why this is believed to NOT gate Tailscale
+      # traffic, since Tailscale presents to iOS as a VPN/tunnel interface; not verified
+      # on-device). Without NSLocalNetworkUsageDescription present, iOS never shows the "Allow
+      # Howland to find and connect to devices on your local network?" permission prompt and
+      # the connection just fails (NSURLErrorNotConnectedToInternet -- a transport error, not
+      # the TLS error ATS misconfiguration produces). This key was entirely absent before, so
+      # LAN/.local connections would have failed regardless of the ATS settings above.
+      - name: Declare local network usage (iOS)
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile
+        run: |
+          P=ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$P" >/dev/null 2>&1 || \
+            /usr/libexec/PlistBuddy -c 'Add :NSLocalNetworkUsageDescription string "Howland connects to your self-hosted Howland server on your local network."' "$P"
+          /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$P"
+
+      - name: Install CocoaPods dependencies
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile/ios/App
+        run: pod install
+
+      # Import the distribution certificate into a temporary keychain and install the
+      # provisioning profile. The profile NAME is derived from the decoded profile itself, so no
+      # separate APPLE_PROVISIONING_PROFILE_NAME secret is required.
+      - name: Setup iOS signing
+        if: ${{ env.CAN_SHIP == 'true' }}
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode -o "$CERTIFICATE_PATH"
+          echo "$APPLE_PROVISIONING_PROFILE_BASE64" | base64 --decode -o "$PP_PATH"
+
+          security create-keychain -p actions "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p actions "$KEYCHAIN_PATH"
+
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERT_PASSWORD" -t cert -f pkcs12 -k "$KEYCHAIN_PATH" -T /usr/bin/codesign
+          # Without the partition-list stamp, codesign under xcodebuild hits a UI keychain
+          # prompt no CI runner can answer.
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PP_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/"
+
+          # Derive the provisioning profile name from the profile file itself.
+          PROFILE_NAME=$(security cms -D -i "$PP_PATH" | plutil -extract Name raw -)
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "Using provisioning profile: $PROFILE_NAME"
+
+      - name: Build iOS archive (signed)
+        if: ${{ env.CAN_SHIP == 'true' }}
+        working-directory: mobile/ios/App
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -sdk iphoneos \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            archive \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.howland.app \
+            MARKETING_VERSION="$STAMP_VERSION" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME"
+
+      - name: Export IPA (signed)
+        if: ${{ env.CAN_SHIP == 'true' }}
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # method defaults to app-store. For direct device sideloading change it (and use a
+          # matching provisioning profile) to ad-hoc or development.
+          cat > "$RUNNER_TEMP/ExportOptions.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.howland.app</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>compileBitcode</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/build"
+
+      - name: Stage the iOS archive for App Store Connect
+        if: ${{ env.CAN_SHIP == 'true' }}
+        run: |
+          mkdir -p mobile-artifacts-ios
+          cp "$RUNNER_TEMP"/build/*.ipa mobile-artifacts-ios/Howland-Client-iOS-arm64.ipa
+          ls -la mobile-artifacts-ios
+
+      - name: Upload iOS artifact
+        if: ${{ env.CAN_SHIP == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: mobile-ios
+          path: mobile-artifacts-ios/*
+
+  release:
+    # Every head, one publish. `always()` because a leg that could not sign still ends green and
+    # a leg that FAILED must not silently take the publish with it — the reconciliation below is
+    # what decides whether this run is a release or an error.
+    needs: [build-desktop, build-android, build-ios]
+    if: ${{ always() && github.repository == 'ayers-software-repair/openwork' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # ONE RELEASE TRAIN guard: this workflow and mobile-release.yml both fire on howland-v*
@@ -293,82 +942,93 @@ jobs:
         with:
           path: artifacts
 
-      # Rename to STABLE, version-less names so the site's latest/download/<name> URLs never change
-      # between versions (the MeridianVega trap: versioned asset names break the "latest" links).
-      - name: Collect + rename installers to stable names
+      # THE EXPECTED LIST. Twenty assets: this workflow publishes desktop and mobile; the
+      # server's nine come from the howland repo onto the same release. An asset whose
+      # distribution channel is NOT the release page is deliberately absent from this list
+      # rather than being a permanent "not built" line — the iOS .ipa goes to App Store
+      # Connect. (Agreed with neptune-go-live; their Roku and watch-web zips are excluded by
+      # the same rule.)
+      - name: Collect what was built
         run: |
+          set -euo pipefail
           mkdir -p release
-          # Exactly one match, or fail. `head -1` would silently publish an arbitrary file when a
-          # glob matches several — which is precisely how a wrong-architecture package ships under
-          # the right name, and nothing downstream would catch it.
-          pick() {
-            local found; found=$(find artifacts -type f -name "$1")
-            local n; n=$(printf '%s' "$found" | grep -c . || true)
-            if [ "$n" -ne 1 ]; then
-              echo "::error::glob '$1' matched $n files, expected exactly 1:"; echo "$found"; exit 1
+          # More than one match is still fatal: `head -1` is how a wrong-architecture package
+          # ships under the right name. ZERO matches is NOT fatal here — a leg that could not
+          # sign is expected to be absent, and the reconciliation step below is what tells the
+          # two apart.
+          take() {
+            local glob="$1" dest="$2" found n
+            found=$(find artifacts -type f -name "$glob")
+            n=$(printf '%s' "$found" | grep -c . || true)
+            if [ "$n" -gt 1 ]; then
+              echo "::error::glob [$glob] matched $n files, expected at most 1:"; echo "$found"; exit 1
             fi
-            printf '%s' "$found"
+            if [ "$n" -eq 1 ]; then cp "$found" "release/$dest"; fi
           }
-          # Two mac architectures build now, so the globs are arch-specific (artifactName
-          # renders howland-mac-arm64-* and howland-mac-x64-*).
-          # Grammar: <Product>-<Component>-<Platform>-<Arch>.<ext>, arch ALWAYS explicit
-          # (agreed with neptune, owner ruling 2026-08-24). The .zip pair is the
-          # electron-updater PAYLOAD on macOS — Squirrel cannot apply a dmg — and is never
-          # offered as a download; the .tar.gz pair is dropped entirely (a zip by another
-          # name, which the owner ruled against).
-          cp "$(pick '*mac-arm64*.dmg')"         release/Howland-Desktop-macOS-arm64.dmg
-          cp "$(pick '*mac-arm64*.zip')"         release/Howland-Desktop-macOS-arm64.zip
-          cp "$(pick '*mac-x64*.dmg')"           release/Howland-Desktop-macOS-x64.dmg
-          cp "$(pick '*mac-x64*.zip')"           release/Howland-Desktop-macOS-x64.zip
-          cp "$(pick '*win-x64*.exe')"           release/Howland-Desktop-Windows-x64.exe
-          cp "$(pick '*win-arm64*.exe')"         release/Howland-Desktop-Windows-arm64.exe
-          cp "$(pick '*linux-x86_64*.AppImage')" release/Howland-Desktop-Linux-x64.AppImage
-          # ${arch} in artifactName is not one token across Linux targets. From electron-builder's
-          # own getArtifactArchName(arch, ext) in builder-util:
-          #   AppImage  x64 -> x86_64   arm64 -> arm64
-          #   tar.gz    x64 -> x64      arm64 -> arm64
-          #   deb       x64 -> amd64    arm64 -> arm64
-          # The .deb glob used to be a bare '*.deb' on the grounds that only one Linux leg existed.
-          # Two do now, so it is arch-specific — a bare glob would have picked whichever the
-          # filesystem returned first and could have published an arm64 package under the x64 name.
-          cp "$(pick '*linux-amd64*.deb')"       release/Howland-Desktop-Linux-x64.deb
-          cp "$(pick '*linux-arm64*.AppImage')"  release/Howland-Desktop-Linux-arm64.AppImage
-          cp "$(pick '*linux-arm64*.deb')"       release/Howland-Desktop-Linux-arm64.deb
-          # The six per-platform+arch updater metadata files ride the same release; each leg
-          # produced exactly one, uniquely named.
-          find artifacts -name 'latest*.yml' -exec cp {} release/ \;
-          YMLS=$(find release -maxdepth 1 -name 'latest*.yml' | wc -l)
-          if [ "$YMLS" -ne 6 ]; then echo "::error::expected 6 updater metadata files, found $YMLS"; exit 1; fi
-          # The metadata files EXIST is not the same as the metadata being CORRECT. Every
-          # url: inside them must name a file that actually ships in this release: a stale
-          # entry (an asset rename that missed the rewrite table, say) publishes green,
-          # passes the release-preflight liveness sweep — which only checks the yml itself
-          # resolves — and then 404s on every user's auto-update forever, because the
-          # recorded sha512 and size stay valid and only the NAME is wrong.
+          # Grammar: <Product>-<Component>-<Platform>-<Arch>.<ext>, arch ALWAYS explicit. The
+          # .zip pair is the electron-updater PAYLOAD on macOS (Squirrel cannot apply a dmg) and
+          # is never offered as a download; the .tar.gz pair is dropped (a zip by another name).
+          take '*mac-arm64*.dmg'         Howland-Desktop-macOS-arm64.dmg
+          take '*mac-arm64*.zip'         Howland-Desktop-macOS-arm64.zip
+          take '*mac-x64*.dmg'           Howland-Desktop-macOS-x64.dmg
+          take '*mac-x64*.zip'           Howland-Desktop-macOS-x64.zip
+          take '*win-x64*.exe'           Howland-Desktop-Windows-x64.exe
+          take '*win-arm64*.exe'         Howland-Desktop-Windows-arm64.exe
+          take '*linux-x86_64*.AppImage' Howland-Desktop-Linux-x64.AppImage
+          # ${arch} is not one token across Linux targets (electron-builder's
+          # getArtifactArchName): AppImage x64 -> x86_64, deb x64 -> amd64, both arm64 -> arm64.
+          # A bare '*.deb' would publish whichever the filesystem returned first.
+          take '*linux-amd64*.deb'       Howland-Desktop-Linux-x64.deb
+          take '*linux-arm64*.AppImage'  Howland-Desktop-Linux-arm64.AppImage
+          take '*linux-arm64*.deb'       Howland-Desktop-Linux-arm64.deb
+          # Mobile artifacts are already stable-named by their leg.
+          take 'Howland-Client-Android.apk' Howland-Client-Android.apk
+          take 'Howland-Client-Android.aab' Howland-Client-Android.aab
+          # Updater metadata: each leg emits exactly one, uniquely named.
+          find artifacts -name 'latest*.yml' -exec cp {} release/ \; 2>/dev/null || true
+          echo "Collected:"; ls -la release
+
+      # Checksums describe WHAT SHIPPED, not what was hoped for: a manifest listing an asset the
+      # release does not carry fails `sha256sum -c` for every user who checks. Written last so
+      # neither manifest can describe itself.
+      - name: Checksum what shipped
+        run: |
+          set -euo pipefail
+          cd release
+          # Unquoted on purpose: these hold a LIST of filenames and word splitting is how the
+          # list reaches sha256sum. Our asset names are generated from the grammar and contain
+          # no spaces or globs.
+          # shellcheck disable=SC2086
+          {
+            desktop=$(ls Howland-Desktop-*.dmg Howland-Desktop-*.zip Howland-Desktop-*.exe \
+                         Howland-Desktop-*.AppImage Howland-Desktop-*.deb 2>/dev/null || true)
+            if [ -n "$desktop" ]; then sha256sum $desktop > Howland-Desktop-CHECKSUMS.txt; fi
+            client=$(ls Howland-Client-Android.* 2>/dev/null || true)
+            if [ -n "$client" ]; then sha256sum $client > Howland-Client-CHECKSUMS.txt; fi
+          }
+          ls -la
+
+      # The metadata files EXISTING is not the metadata being CORRECT. Every url: inside a
+      # latest*.yml must name a file that actually ships: a stale entry publishes green, passes a
+      # liveness sweep that only checks the yml resolves, and then 404s on every user's
+      # auto-update forever — the recorded sha512 and size stay valid, only the NAME is wrong.
+      - name: Updater metadata must name shipping files
+        run: |
+          set -euo pipefail
           MISSING=0
           for yml in release/latest*.yml; do
+            [ -e "$yml" ] || continue
+            grep -oE '^[[:space:]]*(-[[:space:]]*)?url:[[:space:]]*[^[:space:]]+' "$yml" \
+              | awk '{print $NF}' > /tmp/refs
             while IFS= read -r ref; do
               [ -n "$ref" ] || continue
               if [ ! -f "release/$ref" ]; then
                 echo "::error::$yml points at $ref, which is not in this release"
                 MISSING=$((MISSING+1))
               fi
-            done <<EOF
-          $(grep -oE '^[[:space:]]*(-[[:space:]]*)?url:[[:space:]]*[^[:space:]]+' "$yml" | awk '{print $NF}')
-          EOF
+            done < /tmp/refs
           done
-          if [ "$MISSING" -ne 0 ]; then exit 1; fi
-          # Integrity: checksums published next to the binaries
-          # (sha256sum -c Howland-Desktop-CHECKSUMS.txt). Explicit glob, and the manifest is
-          # written last so it cannot describe itself.
-          ( cd release && sha256sum \
-              Howland-Desktop-macOS-arm64.dmg Howland-Desktop-macOS-arm64.zip \
-              Howland-Desktop-macOS-x64.dmg Howland-Desktop-macOS-x64.zip \
-              Howland-Desktop-Windows-x64.exe Howland-Desktop-Windows-arm64.exe \
-              Howland-Desktop-Linux-x64.AppImage Howland-Desktop-Linux-x64.deb \
-              Howland-Desktop-Linux-arm64.AppImage Howland-Desktop-Linux-arm64.deb \
-              > Howland-Desktop-CHECKSUMS.txt )
-          echo "Stable-named installers:"; ls -la release
+          [ "$MISSING" -eq 0 ]
 
       # Clean product version from the tag (howland-v1.0.0 -> 1.0.0), normalized EXACTLY like
       # the build job's stamp: a non-semver value (branch dispatch, malformed tag) falls back
@@ -386,6 +1046,102 @@ jobs:
             *) VERSION=1.0.0 ;;         # branch build / malformed tag — the locked version
           esac
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # RECONCILIATION — the whole point of the design. Three outcomes per expected asset:
+      #   present                      -> published
+      #   absent WITH a skip record    -> reported in the summary, run stays GREEN
+      #   absent WITHOUT a skip record -> HARD FAIL
+      # The third is what separates "we had no certificate" from "we built it and lost it". A leg
+      # that skips leaves a reason; a leg that broke leaves nothing, so its silence is the signal.
+      - name: Reconcile against the expected assets
+        run: |
+          set -euo pipefail
+          EXPECTED="
+          Howland-Desktop-macOS-arm64.dmg
+          Howland-Desktop-macOS-arm64.zip
+          Howland-Desktop-macOS-x64.dmg
+          Howland-Desktop-macOS-x64.zip
+          Howland-Desktop-Windows-x64.exe
+          Howland-Desktop-Windows-arm64.exe
+          Howland-Desktop-Linux-x64.AppImage
+          Howland-Desktop-Linux-x64.deb
+          Howland-Desktop-Linux-arm64.AppImage
+          Howland-Desktop-Linux-arm64.deb
+          Howland-Desktop-CHECKSUMS.txt
+          latest-mac.yml
+          latest-mac-x64.yml
+          latest.yml
+          latest-arm64.yml
+          latest-linux.yml
+          latest-linux-arm64.yml
+          Howland-Client-Android.apk
+          Howland-Client-Android.aab
+          Howland-Client-CHECKSUMS.txt
+          "
+          published=""; absent=""; unexplained=""
+          total=0; n=0; na=0
+          # A skip record is skips-<leg>/<Asset-Name>.txt inside the downloaded artifacts.
+          # Always exits 0. Under `set -e`, a function ending in a false test would abort the
+          # whole step through `reason=$(reason_for ...)` — and it would abort on the ORDINARY
+          # case of an asset that simply has no skip record.
+          reason_for() {
+            local f
+            f=$(find artifacts -type f -name "$1.txt" | head -1)
+            if [ -n "$f" ]; then head -1 "$f"; fi
+            return 0
+          }
+          for asset in $EXPECTED; do
+            total=$((total+1))
+            if [ -f "release/$asset" ]; then
+              n=$((n+1))
+              published="$published- $asset
+          "
+              continue
+            fi
+            reason=$(reason_for "$asset")
+            if [ -n "$reason" ]; then
+              na=$((na+1))
+              absent="$absent- $asset — $reason
+          "
+            else
+              unexplained="$unexplained- $asset
+          "
+            fi
+          done
+
+          # printf '%s' on the accumulated text, never printf "$var": an asset name containing a
+          # % would otherwise be read as a format specifier.
+          {
+            echo "## Howland ${{ steps.v.outputs.version }} — release contents"
+            echo
+            echo "### Published ($n of $total)"
+            echo
+            printf '%s' "$published" | sed 's/^ *//'
+            echo
+            if [ "$na" -eq 0 ]; then
+              echo "Every expected asset was built and published."
+            else
+              echo "### Not built ($na)"
+              echo
+              printf '%s' "$absent" | sed 's/^ *//'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$unexplained" ]; then
+            {
+              echo
+              echo "### Missing with no reason"
+              echo
+              printf '%s' "$unexplained" | sed 's/^ *//'
+              echo
+              echo "These were expected, no leg reported skipping them, and they are not here. That is a"
+              echo "build or staging failure, not an absent certificate."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::assets went missing with no leg reporting a skip:"
+            printf '%s' "$unexplained"
+            exit 1
+          fi
+          echo "Reconciled: $n of $total published, the rest accounted for."
 
       # Publish to the PUBLIC howland-releases repo (the public download + issues home). PUBLIC so the site
       # links to /releases/latest/download/<StableName>, always current, zero redeploy. RELEASES_PAT = a

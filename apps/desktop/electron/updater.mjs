@@ -52,6 +52,37 @@ function electronUpdaterChannelPath(app) {
   return path.join(app.getPath("userData"), ELECTRON_UPDATER_CHANNEL_FILENAME);
 }
 
+// Auto-update preference (owner ruling 2026-08-24): default ON, the user may opt out, and
+// opting out must leave a WORKING manual path — the explicit check below never consults it.
+// Same shape as platform/settings on the Go side: an ABSENT field reads as ON, so an install
+// that predates the toggle keeps the behaviour it shipped with instead of silently going
+// quiet. Store-distributed heads are out of scope; the store owns their lifecycle.
+const AUTO_UPDATE_FILENAME = "auto-update.v1.json";
+
+function autoUpdatePath(app) {
+  return path.join(app.getPath("userData"), AUTO_UPDATE_FILENAME);
+}
+
+async function readAutoUpdate(app) {
+  try {
+    const parsed = JSON.parse(await readFile(autoUpdatePath(app), "utf8"));
+    return typeof parsed?.autoUpdate === "boolean" ? parsed.autoUpdate : true;
+  } catch {
+    return true;
+  }
+}
+
+async function writeAutoUpdate(app, enabled) {
+  const outputPath = autoUpdatePath(app);
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeFile(
+    outputPath,
+    `${JSON.stringify({ autoUpdate: Boolean(enabled), writtenAt: new Date().toISOString() }, null, 2)}\n`,
+    "utf8",
+  );
+  return Boolean(enabled);
+}
+
 async function readElectronUpdaterChannel(app) {
   try {
     const raw = await readFile(electronUpdaterChannelPath(app), "utf8");
@@ -261,8 +292,13 @@ export function registerUpdaterIpc({ app, ipcMain, getMainWindow }) {
       const mod = await import("electron-updater");
       autoUpdaterInstance = mod.autoUpdater ?? mod.default?.autoUpdater ?? null;
       if (autoUpdaterInstance) {
+        // Gated on the preference: with auto-update off nothing downloads and nothing is
+        // staged for install on quit. Re-applied on every check (applyAutoUpdatePreference)
+        // so flipping the toggle takes effect without a restart. autoDownload stays false
+        // even when ON — a download is the user's click; the preference governs the CHECK
+        // and the install-on-quit staging.
         autoUpdaterInstance.autoDownload = false;
-        autoUpdaterInstance.autoInstallOnAppQuit = true;
+        autoUpdaterInstance.autoInstallOnAppQuit = await readAutoUpdate(app);
         // Differential (blockmap) downloads reconstruct the update zip from the
         // installed app + a diff. On macOS that reconstructed bundle is what
         // feeds Squirrel's fragile move-based install, and is a common trigger
@@ -310,6 +346,18 @@ export function registerUpdaterIpc({ app, ipcMain, getMainWindow }) {
     return updaterChannelState(app, channel);
   });
 
+  ipcMain.handle("openwork:updater:getAutoUpdate", async () => ({ autoUpdate: await readAutoUpdate(app) }));
+
+  ipcMain.handle("openwork:updater:setAutoUpdate", async (_event, enabled) => {
+    const value = await writeAutoUpdate(app, enabled);
+    // Apply to the live instance so the choice takes effect without a restart. With it off
+    // nothing is staged for install on quit; the explicit check below still works, which is
+    // what keeps opting out from being a dead end (owner ruling 2026-08-24).
+    const updater = await ensureAutoUpdater();
+    if (updater) updater.autoInstallOnAppQuit = value;
+    return { autoUpdate: value };
+  });
+
   ipcMain.handle("openwork:updater:check", async (_event, rawChannel) => {
     if (rawChannel !== undefined) {
       await writeElectronUpdaterChannel(app, rawChannel);
@@ -319,6 +367,7 @@ export function registerUpdaterIpc({ app, ipcMain, getMainWindow }) {
       ? await applyElectronUpdaterFeed(app, updater)
       : updaterChannelState(app, await readElectronUpdaterChannel(app));
     if (!updater) return { available: false, reason: "unavailable", ...channelState };
+    updater.autoInstallOnAppQuit = await readAutoUpdate(app);
     try {
       const result = await updater.checkForUpdates();
       const info = result?.updateInfo ?? null;

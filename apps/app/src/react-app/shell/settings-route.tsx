@@ -1075,8 +1075,27 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
     writeStoredBoolean(SETTINGS_HIDE_TITLEBAR_KEY, hideTitlebar);
   }, [hideTitlebar]);
 
+  // The auto-update preference lives in the MAIN process (it gates Squirrel's
+  // install-on-quit staging and the periodic check), so the switch reads and writes there
+  // when the desktop bridge exists; localStorage remains the web fallback. Before this, the
+  // toggle only wrote localStorage and the main process never saw it — a switch that did
+  // nothing. Owner ruling 2026-08-24: default ON, opting out must leave the manual
+  // "Check for updates" working, which it does — that path never consults this preference.
+  useEffect(() => {
+    const updater = window.__OPENWORK_ELECTRON__?.updater;
+    if (!updater?.getAutoUpdate) return;
+    let cancelled = false;
+    void updater.getAutoUpdate().then((result) => {
+      if (!cancelled && typeof result?.autoUpdate === "boolean") setUpdateAutoCheck(result.autoUpdate);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     writeStoredBoolean(SETTINGS_UPDATE_AUTO_CHECK_KEY, updateAutoCheck);
+    void window.__OPENWORK_ELECTRON__?.updater?.setAutoUpdate?.(updateAutoCheck);
   }, [updateAutoCheck]);
 
   useEffect(() => {

@@ -99,6 +99,11 @@ declare global {
         evalRelaunch?: () => Promise<EvalRelaunchResult>;
       };
       updater?: {
+        // Auto-update preference (owner ruling 2026-08-24): default ON, lives in the main
+        // process because it gates Squirrel's install-on-quit staging; the manual check
+        // never consults it, so opting out is not a dead end.
+        getAutoUpdate?: () => Promise<{ autoUpdate: boolean }>;
+        setAutoUpdate?: (enabled: boolean) => Promise<{ autoUpdate: boolean }>;
         getChannel?: () => Promise<{
           channel: "stable" | "alpha";
           feedUrl: string;

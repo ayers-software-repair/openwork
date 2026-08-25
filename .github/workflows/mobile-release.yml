@@ -2,7 +2,7 @@ name: Release Howland Mobile
 
 # Tag-driven mobile release. Wraps the apps/app web build in Capacitor and produces native
 # Android (APK + AAB) and iOS (IPA) apps, then publishes them to the public releases repo
-# under stable, version-less names (Howland-Android.apk / Howland-Android.aab / Howland-iOS.ipa).
+# under stable, version-less names (Howland-Client-Android.apk / Howland-Client-Android.aab / Howland-Client-iOS-arm64.ipa).
 #
 # Triggers:
 #   - howland-v*        : co-publishes mobile assets onto the SAME release/tag as the desktop
@@ -264,8 +264,8 @@ jobs:
         if: steps.signing.outputs.enabled == 'true'
         run: |
           mkdir -p mobile-artifacts
-          cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile-artifacts/Howland-Android.apk
-          cp mobile/android/app/build/outputs/bundle/release/app-release.aab mobile-artifacts/Howland-Android.aab
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile-artifacts/Howland-Client-Android.apk
+          cp mobile/android/app/build/outputs/bundle/release/app-release.aab mobile-artifacts/Howland-Client-Android.aab
           ls -la mobile-artifacts
 
       - name: Upload Android artifacts
@@ -526,7 +526,7 @@ jobs:
         if: steps.signing.outputs.enabled == 'true'
         run: |
           mkdir -p mobile-artifacts-ios
-          cp "$RUNNER_TEMP"/build/*.ipa mobile-artifacts-ios/Howland-iOS.ipa
+          cp "$RUNNER_TEMP"/build/*.ipa mobile-artifacts-ios/Howland-Client-iOS-arm64.ipa
           ls -la mobile-artifacts-ios
 
       - name: Upload iOS artifact
@@ -565,14 +565,14 @@ jobs:
           # DECISION 2026-08-24: the iOS .ipa is NEVER a release asset — it exists for App
           # Store Connect submission and stays a CI artifact only. Android apk (sideload is a
           # real channel for an offline-first product) and aab (the store artifact) publish.
-          for f in Howland-Android.apk Howland-Android.aab; do
+          for f in Howland-Client-Android.apk Howland-Client-Android.aab; do
             n="$(find artifacts -type f -name "$f" | wc -l)"
             if [ "$n" -gt 1 ]; then echo "::error::$n files match $f - refusing to publish an arbitrary one"; exit 1; fi
             src="$(find artifacts -type f -name "$f")"
             if [ -n "$src" ]; then cp "$src" "release/$f"; else echo "absent (unsigned/skipped): $f"; fi
           done
-          # Integrity: checksums published next to the binaries (sha256sum -c SHA256SUMS-mobile.txt).
-          if ls release/Howland-* >/dev/null 2>&1; then ( cd release && sha256sum Howland-* > SHA256SUMS-mobile.txt ); fi
+          # Integrity: checksums published next to the binaries (sha256sum -c Howland-Client-CHECKSUMS.txt).
+          if ls release/Howland-* >/dev/null 2>&1; then ( cd release && sha256sum Howland-* > Howland-Client-CHECKSUMS.txt ); fi
           echo "Mobile release assets:"; ls -la release || true
 
       # Clean product version from the tag (howland-mobile-v1.0.0 / howland-v1.0.0 -> 1.0.0).

@@ -69,7 +69,7 @@ env vars in `capacitor.config.ts` control this:
 
 `.github/workflows/mobile-release.yml` builds Android (APK + AAB) and iOS (IPA) on tag
 `howland-v*` or `howland-mobile-v*`, renames outputs to stable names
-(`Howland-Android.apk`, `Howland-Android.aab`, `Howland-iOS.ipa`), and publishes them to
+(`Howland-Client-Android.apk`, `Howland-Client-Android.aab`, `Howland-Client-iOS-arm64.ipa`), and publishes them to
 `ayers-software-repair/howland-releases`.
 
 **Signing is gated on repository secrets.** When a platform's signing secrets are absent, the

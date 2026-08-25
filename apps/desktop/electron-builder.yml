@@ -99,7 +99,8 @@ linux:
   # upstream defect. Rather than ship a silently-skipped step, Linux ships AppImage + tar.gz + deb.
   target:
     - AppImage
-    - tar.gz
+    # tar.gz removed (owner ruling: a user is never handed a zip, and a tar.gz is a zip by
+    # another name). Building it only to discard it in the release job wasted a transfer.
     - deb
 win:
   icon: resources/icons/icon.ico

@@ -433,11 +433,15 @@ jobs:
           # electron-builder.yml / package.json stay untouched and upstream still merges. Version-locked
           # to 1.0.0 until production is declared (mirrors Neptune's <Version>1.0.0</Version>); once a
           # real tag drives it (howland-v1.2.3), that flows through here automatically.
-          VERSION=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-)?v?//')
+          # CANONICAL version derivation — identical in all four stamp sites across the two
+          # workflows (this file x3, ios-submission x1). Two drifted variants once coexisted;
+          # latent only because the tag filter is howland-v* alone, and a widened filter would
+          # have had desktop and mobile disagree about the same tag.
+          VERSION=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-(mobile-)?)?v?//')
           case "$VERSION" in
-            *[!0-9.]*) VERSION=1.0.0 ;;   # any non-digit/dot means not a version
-            [0-9]*.[0-9]*.[0-9]*) ;;   # a semver from the tag — use it
-            *) VERSION=1.0.0 ;;         # branch build / malformed tag — fall back to the locked version
+            *[!0-9.]*|"") VERSION=1.0.0 ;;  # any non-digit/dot (or nothing) is not a version
+            [0-9]*.[0-9]*.[0-9]*) ;;        # a full semver from the tag — use it
+            *) VERSION=1.0.0 ;;             # a bare "1" or "1.2" — the locked version
           esac
           echo "Stamping Howland app version: $VERSION"
           pnpm --filter @openwork/desktop run build:electron
@@ -503,7 +507,11 @@ jobs:
             windows)       SRC=latest.yml;      OUT=latest.yml ;;
             windows-arm64) SRC=latest.yml;      OUT=latest-arm64.yml ;;
             linux)         SRC=latest-linux.yml;       OUT=latest-linux.yml ;;
-            linux-arm64)   SRC=$(find . -maxdepth 1 -name 'latest-linux*.yml' -printf '%f\n' | head -1); OUT=latest-linux-arm64.yml ;;
+            # Named like the other five: on an arm64 host electron-builder emits
+            # latest-linux-arm64.yml. The old find|head discovered it — SIGPIPE-abortable
+            # under pipefail, and filesystem order would have picked the channel if two
+            # files ever matched.
+            linux-arm64)   SRC=latest-linux-arm64.yml; OUT=latest-linux-arm64.yml ;;
           esac
           test -f "$SRC" || { echo "::error::updater metadata $SRC was not emitted"; exit 1; }
           python3 - "$SRC" <<'PY'
@@ -526,7 +534,6 @@ jobs:
           print(text)
           PY
           if [ "$SRC" != "$OUT" ]; then mv "$SRC" "$OUT"; fi
-          rm -f latest*.yml.bak
 
       - name: Upload installers
         if: ${{ env.CAN_SHIP == 'true' }}
@@ -625,36 +632,17 @@ jobs:
       # preset, which Gradle picks up. If a future runner image drops the SDK, add
       # android-actions/setup-android here before the Gradle build.
 
-      - name: Install workspace deps
+      - name: Stage the mobile web bundle
         if: ${{ env.CAN_SHIP == 'true' }}
-        run: pnpm install --frozen-lockfile
-
-      - name: Build web bundle (apps/app)
-        if: ${{ env.CAN_SHIP == 'true' }}
-        env:
-          VITE_OPENWORK_POSTHOG_KEY: ""
-        run: pnpm --filter @openwork/app run build:web
-
-      # Stage the web bundle where capacitor.config.ts expects it (webDir: dist).
-      - name: Stage web bundle into mobile/dist
-        if: ${{ env.CAN_SHIP == 'true' }}
-        run: |
-          rm -rf mobile/dist
-          mkdir -p mobile/dist
-          cp -R apps/app/dist/. mobile/dist/
-
-      # Standalone npm project (outside the pnpm workspace); package-lock.json is committed,
-      # so npm ci gives reproducible inputs.
-      - name: Install Capacitor deps
-        if: ${{ env.CAN_SHIP == 'true' }}
-        working-directory: mobile
-        run: npm ci
+        uses: ./.github/actions/stage-mobile-web
 
       - name: Add + sync Android platform
         if: ${{ env.CAN_SHIP == 'true' }}
         working-directory: mobile
         run: |
-          if [ ! -d android ]; then npx cap add android; fi
+          # No exists-guard: mobile/.gitignore ignores the native trees by design, so the
+          # runner always generates them fresh.
+          npx cap add android
           npx cap sync android
 
       # Real version stamping: without it every APK/AAB ships Capacitor's default 1.0 /
@@ -669,7 +657,11 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(echo "$RAW_TAG" | sed -E 's/^(howland-(mobile-)?)?v?//')
-          case "$VERSION" in *[!0-9.]*|"") VERSION=1.0.0 ;; esac
+          case "$VERSION" in
+            *[!0-9.]*|"") VERSION=1.0.0 ;;  # any non-digit/dot (or nothing) is not a version
+            [0-9]*.[0-9]*.[0-9]*) ;;        # a full semver from the tag — use it
+            *) VERSION=1.0.0 ;;             # a bare "1" or "1.2" — the locked version
+          esac
           G=android/app/build.gradle
           sed -i -E "s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" "$G"
           sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/" "$G"
@@ -686,6 +678,7 @@ jobs:
         if: ${{ env.CAN_SHIP == 'true' }}
         working-directory: mobile
         run: |
+          set -euo pipefail
           M=android/app/src/main/AndroidManifest.xml
           XML_DIR=android/app/src/main/res/xml
           mkdir -p "$XML_DIR"
@@ -709,7 +702,7 @@ jobs:
             iOS's NSAllowsLocalNetworking does (that key is a runtime OS check, not a static
             list). Since the user's server IP is chosen at connect time and can't be
             enumerated at build time, it cannot be pre-declared here. This is a confirmed
-            platform gap, not an oversight (see mobile-release.yml for the writeup).
+            platform gap, not an oversight (this comment is the writeup).
 
             Given that limitation, this config is split in two:
               1. mDNS ".local" names are proper DNS domains, so they narrow correctly below
@@ -742,13 +735,23 @@ jobs:
           # or a stray previous run) added it, so the app-wide flag and this scoped config file
           # are never both in effect at once.
           sed -i 's/ android:usesCleartextTraffic="true"//' "$M"
+          # VERIFY both halves: the grep above only proved the config was referenced. A
+          # usesCleartextTraffic that survived (moved, requoted) would make the scoped config
+          # decorative — the app-wide flag wins.
+          if grep -q 'usesCleartextTraffic' "$M"; then
+            echo "::error::usesCleartextTraffic survived the strip — the scoped network config would be decorative"
+            grep -n 'usesCleartextTraffic' "$M"
+            exit 1
+          fi
           grep -o 'networkSecurityConfig="[^"]*"' "$M"
 
       - name: Decode Android keystore
         if: ${{ env.CAN_SHIP == 'true' }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > mobile/android/upload.keystore
+        run: |
+          set -euo pipefail
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > mobile/android/upload.keystore
 
       # Signed build. Signing is injected via Gradle properties (android.injected.signing.*) so
       # we do not have to patch the cap-generated build.gradle. This signs both the APK and AAB.
@@ -766,6 +769,9 @@ jobs:
             -Pandroid.injected.signing.store.password="$ANDROID_STORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
             -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
+          # Same secret-material lifecycle as the Windows pfx: decoded, used, REMOVED — the
+          # keystore was written into the working tree and left there.
+          rm -f upload.keystore
 
       - name: Stage Android artifacts (stable names)
         if: ${{ env.CAN_SHIP == 'true' }}
@@ -790,11 +796,13 @@ jobs:
     if: ${{ always() && github.repository == 'ayers-software-repair/openwork' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # ONE RELEASE TRAIN guard: this workflow and mobile-release.yml both fire on howland-v*
-    # tags and publish onto the SAME howland-releases release. A shared job-level group
-    # serializes just the publish jobs (not the builds) so softprops never races itself
-    # creating/updating the release. Constant name on purpose: publishes are quick, the
-    # version is locked at 1.0.0, and job-level concurrency can't see step-computed tags.
+    # ONE RELEASE TRAIN guard. The original reason (a separate mobile workflow racing this one
+    # onto the same release) died when the mobile legs were folded in — the group is KEPT for
+    # the races that remain: two dispatches of this workflow, and this workflow against
+    # howland's server release (same group name there), all publishing onto the one
+    # howland-v1.0.0 release with softprops updates. Constant name on purpose: publishes are
+    # quick, the version is locked at 1.0.0, and job-level concurrency can't see step-computed
+    # tags.
     concurrency:
       group: howland-releases-publish
       cancel-in-progress: false
@@ -917,11 +925,11 @@ jobs:
         env:
           RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          VERSION=$(echo "$RAW_TAG" | sed -E 's/^(howland-)?v?//')
+          VERSION=$(echo "$RAW_TAG" | sed -E 's/^(howland-(mobile-)?)?v?//')
           case "$VERSION" in
-            *[!0-9.]*) VERSION=1.0.0 ;;   # any non-digit/dot means not a version
-            [0-9]*.[0-9]*.[0-9]*) ;;   # a semver from the tag — use it
-            *) VERSION=1.0.0 ;;         # branch build / malformed tag — the locked version
+            *[!0-9.]*|"") VERSION=1.0.0 ;;  # any non-digit/dot (or nothing) is not a version
+            [0-9]*.[0-9]*.[0-9]*) ;;        # a full semver from the tag — use it
+            *) VERSION=1.0.0 ;;             # a bare "1" or "1.2" — the locked version
           esac
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       # RECONCILIATION — the whole point of the design. Three outcomes per expected asset:

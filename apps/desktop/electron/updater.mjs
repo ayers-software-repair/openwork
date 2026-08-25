@@ -38,10 +38,12 @@ function resolveAppVersion(app) {
 // howlandUpdaterChannel below), the update payloads are the same stable-named assets the
 // site serves, and the server preflight sweeps the metadata URLs so a 404 here is caught
 // before a release, not on every user's machine forever. It can never pull upstream.
-const ELECTRON_UPDATER_FEEDS = Object.freeze({
-  stable: "https://github.com/ayers-software-repair/howland-releases/releases/latest/download",
-  alpha: "https://github.com/ayers-software-repair/howland-releases/releases/latest/download",
-});
+// ONE feed. Howland has one release train, so the channel does not change where bytes come
+// from — the upstream stable/alpha map held the identical URL twice, and the channel
+// mechanism reduced to the two updater flags below (allowPrerelease/allowDowngrade), which is
+// all it is. Stated as one constant so nobody hunts for the second feed that never existed.
+const ELECTRON_UPDATER_FEED =
+  "https://github.com/ayers-software-repair/howland-releases/releases/latest/download";
 
 function normalizeElectronUpdaterChannel(value) {
   if (value === "alpha" && process.platform === "darwin") return "alpha";
@@ -105,8 +107,9 @@ async function writeElectronUpdaterChannel(app, channel) {
   return normalized;
 }
 
-function electronUpdaterFeedUrl(channel) {
-  return ELECTRON_UPDATER_FEEDS[normalizeElectronUpdaterChannel(channel)];
+function electronUpdaterFeedUrl() {
+  // The channel picks updater flags, never the feed (see ELECTRON_UPDATER_FEED).
+  return ELECTRON_UPDATER_FEED;
 }
 
 function parseComparableVersion(value) {
@@ -185,7 +188,7 @@ function updaterChannelState(app, channel) {
   const normalized = normalizeElectronUpdaterChannel(channel);
   return {
     channel: normalized,
-    feedUrl: electronUpdaterFeedUrl(normalized),
+    feedUrl: electronUpdaterFeedUrl(),
     currentVersion: resolveAppVersion(app),
   };
 }

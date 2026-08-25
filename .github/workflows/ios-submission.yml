@@ -91,7 +91,11 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(echo "$RAW_TAG" | sed -E 's/^(howland-(mobile-)?)?v?//')
-          case "$VERSION" in *[!0-9.]*|"") VERSION=1.0.0 ;; esac
+          case "$VERSION" in
+            *[!0-9.]*|"") VERSION=1.0.0 ;;  # any non-digit/dot (or nothing) is not a version
+            [0-9]*.[0-9]*.[0-9]*) ;;        # a full semver from the tag — use it
+            *) VERSION=1.0.0 ;;             # a bare "1" or "1.2" — the locked version
+          esac
           echo "STAMP_VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Setup pnpm
@@ -107,23 +111,8 @@ jobs:
           # 10x, so the install it skips is the most expensive one in the estate.
           cache: pnpm
 
-      - name: Install workspace deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Build web bundle (apps/app)
-        env:
-          VITE_OPENWORK_POSTHOG_KEY: ""
-        run: pnpm --filter @openwork/app run build:web
-
-      - name: Stage web bundle into mobile/dist
-        run: |
-          rm -rf mobile/dist
-          mkdir -p mobile/dist
-          cp -R apps/app/dist/. mobile/dist/
-
-      - name: Install Capacitor deps
-        working-directory: mobile
-        run: npm ci
+      - name: Stage the mobile web bundle
+        uses: ./.github/actions/stage-mobile-web
 
       - name: Add + sync iOS platform
         working-directory: mobile
@@ -136,6 +125,7 @@ jobs:
       - name: Allow self-hosted http servers (iOS ATS)
         working-directory: mobile
         run: |
+          set -euo pipefail
           P=ios/App/App/Info.plist
           # Howland servers are self-hosted on the user's LAN, tailnet, or reachable by an
           # mDNS ".local" name, and speak plain http (no cert). Per Apple DTS
@@ -182,6 +172,7 @@ jobs:
       - name: Declare local network usage (iOS)
         working-directory: mobile
         run: |
+          set -euo pipefail
           P=ios/App/App/Info.plist
           /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$P" >/dev/null 2>&1 || \
             /usr/libexec/PlistBuddy -c 'Add :NSLocalNetworkUsageDescription string "Howland connects to your self-hosted Howland server on your local network."' "$P"
@@ -200,6 +191,7 @@ jobs:
           APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
           APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
         run: |
+          set -euo pipefail
           CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
           PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
@@ -220,8 +212,15 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$PP_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/"
 
-          # Derive the provisioning profile name from the profile file itself.
+          # Derive the provisioning profile name from the profile file itself — and REFUSE an
+          # empty result before it reaches GITHUB_ENV: under the old unhardened step a failed
+          # `security cms` pipeline produced an empty name invisibly, and xcodebuild then
+          # signed with an empty PROVISIONING_PROFILE_SPECIFIER instead of failing.
           PROFILE_NAME=$(security cms -D -i "$PP_PATH" | plutil -extract Name raw -)
+          if [ -z "$PROFILE_NAME" ]; then
+            echo "::error::could not derive the provisioning profile name from the decoded profile"
+            exit 1
+          fi
           echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
           echo "Using provisioning profile: $PROFILE_NAME"
 

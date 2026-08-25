@@ -1,0 +1,34 @@
+name: Stage the mobile web bundle
+description: >
+  Build apps/app and stage it where capacitor.config.ts expects it (mobile/dist), then install
+  the Capacitor deps. ONE definition: these four steps were byte-identical in release.yml and
+  ios-submission.yml, which gave the webDir/staging contract two independent homes. The caller
+  provides pnpm + node setup (cache config is per-workflow); this covers everything after.
+runs:
+  using: composite
+  steps:
+    - name: Install workspace deps
+      shell: bash
+      run: pnpm install --frozen-lockfile
+
+    - name: Build web bundle (apps/app)
+      shell: bash
+      env:
+        # Kill upstream analytics: an empty key disables PostHog in any build.
+        VITE_OPENWORK_POSTHOG_KEY: ""
+      run: pnpm --filter @openwork/app run build:web
+
+    - name: Stage web bundle into mobile/dist
+      shell: bash
+      run: |
+        set -euo pipefail
+        rm -rf mobile/dist
+        mkdir -p mobile/dist
+        cp -R apps/app/dist/. mobile/dist/
+
+    # Standalone npm project (outside the pnpm workspace); package-lock.json is committed,
+    # so npm ci gives reproducible inputs.
+    - name: Install Capacitor deps
+      shell: bash
+      working-directory: mobile
+      run: npm ci

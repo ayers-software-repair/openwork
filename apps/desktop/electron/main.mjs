@@ -220,10 +220,10 @@ function howlandAssetName(arch) {
 }
 
 async function resolveCorrectArchitectureDownloadUrl(arch) {
-  // Howland releases carry STABLE version-free asset names and publish no electron-updater
-  // latest-*.yml manifests, so the right-architecture download is a fixed URL. Upstream's
-  // manifest resolution (above) would 404 forever and silently disable the mismatch banner;
-  // instead confirm the stable asset exists so the banner never offers a dead link.
+  // Howland releases carry STABLE version-free asset names (they DO publish per-arch
+  // latest-*.yml manifests since auto-update shipped, but those are the UPDATER's channel
+  // files — the mismatch banner wants the installer for the OTHER architecture, which is a
+  // fixed stable URL). Confirm the asset exists so the banner never offers a dead link.
   const url = `${RELEASE_DOWNLOAD_BASE_URL}/${howlandAssetName(arch)}`;
   try {
     const response = await fetch(url, { method: "HEAD", redirect: "follow" });
@@ -249,7 +249,10 @@ async function resolveArchitectureInfo() {
     mismatch: appArch !== systemArch && hasCorrectArchitectureDownload,
     platform: process.platform === "win32" ? "windows" : process.platform,
     version,
-    downloadUrl: latestDownloadUrl || `${RELEASE_DOWNLOAD_BASE_URL}/${howlandAssetName(targetArch)}`,
+    // null when the HEAD check failed: falling back to the exact URL just determined dead
+    // contradicted the check's whole purpose (the banner is suppressed via mismatch=false in
+    // that case, and a consumer must not find a maybe-dead link here either).
+    downloadUrl: latestDownloadUrl,
     releaseUrl: RELEASE_PAGE_URL,
   };
 }

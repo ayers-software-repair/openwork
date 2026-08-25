@@ -55,6 +55,11 @@ const TAURI_APP_IDENTIFIER = "com.differentai.openwork";
 const HOWLAND_APP_IDENTIFIER = "com.howland.app";
 const DEV_APP_IDENTIFIER = "com.differentai.openwork.dev";
 const DESKTOP_PROTOCOL_SCHEME = "openwork";
+// Howland's own scheme (ADR 0003: the openwork:// links on the hub were the last upstream
+// name on a Howland surface). Registered ALONGSIDE openwork://, not instead of it — links
+// already in the wild keep working — and normalized to the upstream scheme before the
+// renderer sees it, so the renderer's deep-link parsing (upstream internals) is untouched.
+const HOWLAND_PROTOCOL_SCHEME = "howland";
 const isDevMode = process.env.OPENWORK_DEV_MODE === "1";
 const APP_NAME =
   process.env.OPENWORK_ELECTRON_APP_NAME?.trim() ||
@@ -128,6 +133,7 @@ app.setName(APP_NAME);
 app.setAppUserModelId(APP_IDENTIFIER);
 if (app.isPackaged) {
   app.setAsDefaultProtocolClient(DESKTOP_PROTOCOL_SCHEME);
+  app.setAsDefaultProtocolClient(HOWLAND_PROTOCOL_SCHEME);
 }
 const userDataOverride = process.env.OPENWORK_ELECTRON_USERDATA?.trim();
 if (userDataOverride) {
@@ -873,13 +879,23 @@ function forwardedDeepLinks(argv) {
       (entry) =>
         entry.startsWith("openwork://") ||
         entry.startsWith("openwork-dev://") ||
+        entry.startsWith("howland://") ||
         entry.startsWith("https://") ||
         entry.startsWith("http://"),
     );
 }
 
+// The renderer parses openwork:// (upstream code this fork never patches), so Howland's
+// scheme is translated at the door and everything downstream stays stock.
+function normalizeDeepLink(url) {
+  if (typeof url === "string" && url.startsWith("howland://")) {
+    return "openwork://" + url.slice("howland://".length);
+  }
+  return url;
+}
+
 function queueDeepLinks(urls) {
-  const nextUrls = urls.filter(Boolean);
+  const nextUrls = urls.filter(Boolean).map(normalizeDeepLink);
   if (nextUrls.length === 0) return;
   pendingDeepLinks.push(...nextUrls);
   if (mainWindow?.webContents) {

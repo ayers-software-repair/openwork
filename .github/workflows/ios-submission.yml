@@ -9,9 +9,21 @@ name: Submit Howland for iOS
 # per-rebuild cadence anyway — you submit when there is something to submit, and review takes days
 # (owner ruling 2026-08-25).
 #
-# Because it owes the release nothing, this workflow writes NO skip records: there is no expected
-# asset for it to explain. It still refuses to run without the signing secrets, and it says which
-# one is missing rather than archiving something it cannot export.
+# IT HARD FAILS WITHOUT ITS SIGNING SECRETS, and that is NOT an inconsistency with the release
+# workflow's skip-and-report rule — do not "fix" it. That rule exists because a PARTIAL RELEASE is
+# an outcome the owner asked for: assets appear as certificates land. A store submission has no
+# release to be partial about. Somebody pressed this button meaning "submit this", so a dispatch
+# that quietly does nothing is the silence problem wearing a new hat. Uniformity means the same
+# RULE, not the same behaviour in different situations (owner ruling 2026-08-25).
+#
+# It writes no skip records either: it owes the release nothing, so there is no expected asset for
+# it to explain.
+#
+# THE BINARY STAYS A CI ARTIFACT, deliberately, and it EXPIRES — 90 days, the ceiling GitHub
+# allows on a public repository, set explicitly below. It is never published to howland-releases:
+# that repo is PUBLIC, and a signed store binary on a public download page is exposure with no
+# upside, since an .ipa installs for nobody who downloads it. The Actions run page is behind
+# authentication, which is the private channel the hand-upload to App Store Connect needs.
 #
 # The build number is github.run_number, which keeps increasing across dispatches — App Store
 # Connect rejects a re-upload at a build number it has already seen, and the display version stays
@@ -271,12 +283,62 @@ jobs:
 
       - name: Stage the iOS archive for App Store Connect
         run: |
-          mkdir -p mobile-artifacts-ios
-          cp "$RUNNER_TEMP"/build/*.ipa mobile-artifacts-ios/Howland-Client-iOS-arm64.ipa
-          ls -la mobile-artifacts-ios
+          set -euo pipefail
+          # Exactly one, or fail. A glob that matches nothing and reports success is how a run
+          # goes green having produced no binary — the owner then downloads an empty artifact and
+          # finds out at App Store Connect. Count first, never `cp <glob>` and hope.
+          found=$(find "$RUNNER_TEMP/build" -maxdepth 1 -name '*.ipa')
+          n=$(printf '%s' "$found" | grep -c . || true)
+          if [ "$n" -ne 1 ]; then
+            echo "::error::the export produced $n .ipa files, expected exactly 1:"
+            echo "$found"
+            exit 1
+          fi
+          mkdir -p out
+          # Named to the asset grammar even though this never reaches the release page: the owner
+          # downloads it and hands it to App Store Connect, and a file called App.ipa is not
+          # identifiable once it is in a downloads folder beside anything else.
+          cp "$found" out/Howland-Client-iOS-arm64.ipa
+          ls -la out
 
-      - name: Upload iOS artifact
+      - name: Upload the submission binary
         uses: actions/upload-artifact@v7
         with:
-          name: mobile-ios
-          path: mobile-artifacts-ios/*
+          # The artifact carries the asset's own name, not a bundle called "ios" with unnamed
+          # files inside it.
+          name: Howland-Client-iOS-arm64.ipa
+          path: out/Howland-Client-iOS-arm64.ipa
+          # This repository is PUBLIC, and 90 days is the ceiling GitHub allows there. Explicit
+          # rather than relying on the 90-day default, so a changed org default cannot silently
+          # shorten it.
+          retention-days: 90
+          if-no-files-found: error
+
+      # This summary is the owner's interface to this workflow: it is dispatched by hand, and the
+      # binary is collected by hand from the run page. A run that says only "green" leaves the
+      # person who pressed the button to go hunting for what it made.
+      - name: Say what was produced and where to get it
+        run: |
+          set -euo pipefail
+          SIZE=$(du -h out/Howland-Client-iOS-arm64.ipa | cut -f1)
+          {
+            echo "## Howland for iOS — submission binary"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Artifact | \`Howland-Client-iOS-arm64.ipa\` ($SIZE) |"
+            echo "| Version | $STAMP_VERSION |"
+            echo "| Build number | ${{ github.run_number }} |"
+            echo "| Bundle id | com.howland.app |"
+            echo
+            echo "Download it from the **Artifacts** section of this run page, then upload it to"
+            echo "App Store Connect (Transporter, or Xcode's Organizer)."
+            echo
+            echo "The build number rises with every dispatch, which is what App Store Connect"
+            echo "requires — it refuses a re-upload at a build number it has already seen."
+            echo
+            echo "**This artifact expires 90 days after this run.** It is deliberately not published"
+            echo "to howland-releases: that repository is public, and a signed store binary on a"
+            echo "public download page is exposure with no upside, since an .ipa installs for"
+            echo "nobody who grabs it. The run page is behind authentication; that is the point."
+          } >> "$GITHUB_STEP_SUMMARY"

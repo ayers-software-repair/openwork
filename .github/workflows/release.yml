@@ -306,11 +306,22 @@ jobs:
                 can=false; reason="no WINDOWS_CERT_PFX_BASE64, so the Windows legs did not build"
               fi ;;
           esac
+          # CAN_SHIP means RELEASE-ELIGIBLE, not buildable. The leg BUILDS either way (owner
+          # ruling): an unsigned mac or windows binary is worth having as an Actions artifact for
+          # testing, and is never worth publishing. So an unsigned leg produces a real installer
+          # AND a skip record, and the release still shows the name absent-with-reason.
+          #
+          # THOSE TWO MUST NEVER DISAGREE. The artifact exists; the release asset does not. The
+          # release job's take() searches artifacts/ BY FILENAME, so an unsigned dmg would match
+          # its glob and be published — which is why unsigned output uploads under an
+          # `unsigned-` artifact name and take() excludes that directory by path. The separation
+          # is structural rather than a naming convention anyone has to remember.
           echo "CAN_SHIP=$can" >> "$GITHUB_ENV"
           if [ "$can" != "true" ]; then
             mkdir -p skips
             for a in $owed; do printf '%s\n' "$reason" > "skips/$a.txt"; done
-            echo "This leg is not shipping: $reason"
+            echo "This leg builds UNSIGNED and will not be published: $reason"
+            echo "Its installers upload as an Actions artifact only."
             ls skips
           else
             echo "This leg can ship: $owed"
@@ -324,13 +335,11 @@ jobs:
           path: skips/*
 
       - name: Setup pnpm
-        if: ${{ env.CAN_SHIP == 'true' }}
         uses: pnpm/action-setup@v4
         with:
           version: 11.4.0
 
       - name: Setup Node
-        if: ${{ env.CAN_SHIP == 'true' }}
         uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -341,7 +350,6 @@ jobs:
           cache: pnpm
 
       - name: Setup Bun
-        if: ${{ env.CAN_SHIP == 'true' }}
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
@@ -376,7 +384,7 @@ jobs:
       # .deb target cannot use it. USE_SYSTEM_FPM is app-builder's documented escape hatch;
       # a system Ruby fpm builds the same package. Pinned so the .deb metadata is stable.
       - name: System fpm for the arm64 .deb (app-builder ships no arm64 fpm)
-        if: ${{ env.CAN_SHIP == 'true' && matrix.os == 'ubuntu-24.04-arm' }}
+        if: ${{ matrix.os == 'ubuntu-24.04-arm' }}
         run: |
           set -euo pipefail
           sudo apt-get update -q
@@ -413,7 +421,6 @@ jobs:
       # electron-builder.yml linux.target list — see the comment there for why deb can't be
       # added purely via a `-c` override). Branding stays build-time-only via `-c`.
       - name: Package Electron desktop (Howland installers)
-        if: ${{ env.CAN_SHIP == 'true' }}
         shell: bash
         env:
           # Kill upstream analytics: an empty key disables PostHog in any build (the resolver
@@ -535,7 +542,6 @@ jobs:
       # renames its metadata to the per-platform+arch channel file the app requests
       # (howlandUpdaterChannel in electron/updater.mjs — the two lists must match).
       - name: Stable-name the updater metadata
-        if: ${{ env.CAN_SHIP == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -588,6 +594,29 @@ jobs:
           # An upload that matched nothing must not report success: the leg would go green
           # having produced no installer, and the failure would surface one job later as an
           # unexplained absence — pointing at the release job rather than the leg that broke.
+          if-no-files-found: error
+          path: |
+            apps/desktop/dist-electron/*.dmg
+            apps/desktop/dist-electron/*.zip
+            apps/desktop/dist-electron/*.AppImage
+            apps/desktop/dist-electron/*.deb
+            apps/desktop/dist-electron/*.exe
+            apps/desktop/dist-electron/latest*.yml
+
+      # THE UNSIGNED TWIN. Same installers, different artifact NAME, and that name is the whole
+      # safety mechanism: the release job's take() searches artifacts/ by FILENAME, so an unsigned
+      # dmg matches '*mac-arm64*.dmg' exactly as a signed one does. Uploading it under
+      # `unsigned-` puts it in a directory take() excludes BY PATH, so it cannot reach release/
+      # however the globs change later. Structural, not a convention someone has to remember.
+      #
+      # These exist to be TESTED, never shipped. The release still shows these names
+      # absent-with-a-skip-record, and if the artifact and the release ever agree, that is the
+      # defect.
+      - name: Upload UNSIGNED installers (Actions artifact only, never released)
+        if: ${{ env.CAN_SHIP != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-${{ matrix.artifact }}
           if-no-files-found: error
           path: |
             apps/desktop/dist-electron/*.dmg
@@ -886,7 +915,9 @@ jobs:
           # two apart.
           take() {
             local glob="$1" dest="$2" found n
-            found=$(find artifacts -type f -name "$glob")
+            # -path exclusion, not a name filter: unsigned builds carry IDENTICAL filenames and
+            # are told apart only by the artifact directory they landed in.
+            found=$(find artifacts -type f -not -path 'artifacts/unsigned-*' -name "$glob")
             n=$(printf '%s' "$found" | grep -c . || true)
             if [ "$n" -gt 1 ]; then
               echo "::error::glob [$glob] matched $n files, expected at most 1:"; echo "$found"; exit 1
@@ -913,7 +944,7 @@ jobs:
           take 'Howland-Client-Android.apk' Howland-Client-Android.apk
           take 'Howland-Client-Android.aab' Howland-Client-Android.aab
           # Updater metadata: each leg emits exactly one, uniquely named.
-          find artifacts -name 'latest*.yml' -exec cp {} release/ \; 2>/dev/null || true
+          find artifacts -name 'latest*.yml' -not -path 'artifacts/unsigned-*' -exec cp {} release/ \; 2>/dev/null || true
           echo "Collected:"; ls -la release
 
       # Checksums describe WHAT SHIPPED, not what was hoped for: a manifest listing an asset the

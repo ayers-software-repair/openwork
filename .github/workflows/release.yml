@@ -498,7 +498,15 @@ jobs:
           limits the rights those licences grant you. Some are licensed under the GNU
           General Public License or the GNU Affero General Public License.
           COPY
-          sed -i 's/^          //' howland-copyright
+          # NOT `sed -i`. THIS STEP RUNS ON ALL THREE OSes AND macOS SHIPS BSD sed, where -i
+          # takes the backup suffix as its OWN argument: `sed -i 's/x//' f` there consumes the
+          # expression as the suffix and then reads the FILENAME as the script, which failed both
+          # macOS legs with `sed: 1: "howland-copyright": extra characters at the end of h
+          # command` — an error naming the file rather than the flag. GNU sed accepted it, so
+          # Linux and Windows were green and it looked platform-specific rather than portable-
+          # syntax-specific. Redirect-and-move is the form that means the same thing everywhere.
+          sed 's/^          //' howland-copyright > howland-copyright.tmp
+          mv howland-copyright.tmp howland-copyright
 
           test -f electron-builder.yml
           grep -q '^protocols:' electron-builder.yml \

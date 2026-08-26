@@ -358,6 +358,15 @@ jobs:
         if: ${{ env.CAN_SHIP == 'true' }}
         run: pnpm install --frozen-lockfile
 
+      # THE -c. OVERRIDE NAMES ARE REAL OPTIONS. This is the first point the schema exists on the
+      # runner, so it is the earliest this can be asked. Linux only, because the answer is the
+      # same on every leg: electron-builder validates the MERGED config, so a bad name is a
+      # property of the command line and not of the platform — which is exactly why one of them
+      # failed all six legs, two of them eight minutes in, and published nothing.
+      - name: The electron-builder overrides name real options
+        if: ${{ env.CAN_SHIP == 'true' && runner.os == 'Linux' }}
+        run: ./scripts/check-builder-flags.sh
+
       # --- macOS signing (soft-fail) --------------------------------------------------------
       # electron-builder reads CSC_LINK / CSC_KEY_PASSWORD straight from the environment, and
       # an EMPTY CSC_LINK is NOT treated as unset: app-builder-lib keeps "" (getCscLink uses
@@ -532,10 +541,25 @@ jobs:
           # the fields are matched by hand. Deliberate imitation, not redundancy — do not delete
           # as duplicated defaults; if deb.sh changes one, change it here in the same pass.
           #
-          # Two option names are traps, both verified in app-builder-lib 25.1.8
-          # out/options/linuxOptions.d.ts: synopsis is the Debian SHORT description (description
-          # is the long one), and linux.category is the freedesktop MENU category — Section comes
-          # from deb.packageCategory.
+          # EVERY -c. NAME BELOW IS VERIFIED AGAINST app-builder-lib 25.1.8
+          # out/options/linuxOptions.d.ts. Two are traps: synopsis is the Debian SHORT
+          # description (description is the long one), and linux.category is the freedesktop
+          # MENU category — Section comes from deb.packageCategory.
+          #
+          # A THIRD NAME WAS ADDED UNDER THIS COMMENT WITHOUT BEING LOOKED UP, AND IT COST THE
+          # WHOLE DESKTOP FAMILY. `-c.linux.license` does not exist: `license` is on
+          # AppImageOptions and FlatpakOptions only, and it takes a PATH TO A FILE rather than a
+          # licence string, so it was wrong in two ways at once. electron-builder validates the
+          # MERGED CONFIG BEFORE ANY PLATFORM WORK, so one bad name failed all six legs — two of
+          # them after eight minutes of setup — and published nothing at all.
+          #
+          # THE DEBIAN LICENCE FIELD IS NOT SET FROM HERE AND DOES NOT NEED TO BE: what dpkg
+          # leads a reader to is /usr/share/doc/howland/copyright, written by the deb.fpm path
+          # mapping above.
+          #
+          # scripts/check-builder-flags.sh checks these names against the installed schema now,
+          # because THIS COMMENT CLAIMING VERIFICATION IS WHAT MADE THE UNVERIFIED LINE LOOK
+          # CHECKED. A note about diligence sits there whether the next line was diligent or not.
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
             -c.productName=Howland -c.appId=com.howland.app \
             -c.extraMetadata.version="$VERSION" \
@@ -547,7 +571,6 @@ jobs:
             -c.linux.synopsis="Howland" \
             '-c.deb.packageCategory=utils' \
             '-c.deb.priority=optional' \
-            '-c.linux.license=Proprietary freeware. Free to use, not open source.' \
             --publish never
 
       # --- Windows Authenticode (soft-fail, isolated + swappable) ---------------------------

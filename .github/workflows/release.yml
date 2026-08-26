@@ -530,14 +530,20 @@ jobs:
             "macos-intel":   {"zip": "Howland-Desktop-macOS-x64.zip",   "dmg": "Howland-Desktop-macOS-x64.dmg"},
             "windows":       {"exe": "Howland-Desktop-Windows-x64.exe"},
             "windows-arm64": {"exe": "Howland-Desktop-Windows-arm64.exe"},
-            "linux":         {"AppImage": "Howland-Desktop-Linux-x64.AppImage"},
-            "linux-arm64":   {"AppImage": "Howland-Desktop-Linux-arm64.AppImage"},
+            # BOTH Linux artifacts belong here. electron-builder writes a url: for the .deb
+            # as well as the AppImage, and a map that only knew about AppImage left the deb
+            # url naming a file that no longer exists after the stable rename - which the
+            # "metadata must name shipping files" guard caught, exactly as intended.
+            "linux":         {"AppImage": "Howland-Desktop-Linux-x64.AppImage",
+                              "deb":      "Howland-Desktop-Linux-x64.deb"},
+            "linux-arm64":   {"AppImage": "Howland-Desktop-Linux-arm64.AppImage",
+                              "deb":      "Howland-Desktop-Linux-arm64.deb"},
           }["${{ matrix.artifact }}"]
           text = open(src).read()
           def sub(m):
               ext = m.group(1)
               return stable.get(ext, m.group(0))
-          text = re.sub(r"howland-[A-Za-z0-9._-]+\.(zip|dmg|exe|AppImage)", sub, text)
+          text = re.sub(r"howland-[A-Za-z0-9._-]+\.(zip|dmg|exe|AppImage|deb)", sub, text)
           open(src, "w").write(text)
           print(text)
           PY

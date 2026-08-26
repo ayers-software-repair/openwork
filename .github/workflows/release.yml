@@ -470,6 +470,27 @@ jobs:
           # branding gap straight back, and this is the second time this option has shipped
           # wrong precisely because nothing checked.
           cd apps/desktop
+
+          # THE COPYRIGHT FILE, at the path Debian actually reads. `linux.license` sets a control
+          # field dpkg never looks at; /usr/share/doc/<pkg>/copyright is what `dpkg -L` leads to
+          # and what a licence audit greps. TEXT MIRRORS packaging/kit/linux/deb.sh, which writes
+          # the same file for every other package in the estate — change both in one pass.
+          cat > howland-copyright <<'COPY'
+          Copyright Ayers Electronics Inc. All rights reserved.
+
+          Howland is proprietary freeware. Ayers Electronics Inc grants a personal,
+          non-exclusive, non-transferable, revocable licence to install and use it in the
+          unmodified form in which it is distributed, for personal or internal business
+          purposes, on as many machines as you like, at no charge.
+
+          It is not open source. No source code is provided or promised.
+
+          Bundled third-party components remain under their own licences, and nothing here
+          limits the rights those licences grant you. Some are licensed under the GNU
+          General Public License or the GNU Affero General Public License.
+          COPY
+          sed -i 's/^          //' howland-copyright
+
           test -f electron-builder.yml
           grep -q '^protocols:' electron-builder.yml \
             || { echo "::error::electron-builder.yml has no protocols block - upstream changed it"; exit 1; }
@@ -488,8 +509,21 @@ jobs:
               sys.exit("::error::openwork survived inside the protocols block")
           if "- howland" not in out:
               sys.exit("::error::the howland scheme was not written")
+          # deb.fpm is a raw fpm argument list, and this entry is a PATH MAPPING of exactly the
+          # form FpmTarget.js already emits for the icon and the .desktop file (:189, :196). It is
+          # written into the generated config rather than passed with -c because dot-notation
+          # cannot express an array element here — it failed on protocols for the same reason.
+          #
+          # afterPack and extraFiles CANNOT do this: appOutDir maps entirely to /opt
+          # (LinuxTargetHelper.js:8, FpmTarget.js:185), so both land the file in /opt/Howland
+          # where nothing looks. Verified in app-builder-lib 25.1.8.
+          if "\ndeb:\n" in out:
+              sys.exit("::error::upstream added a deb: block; merge the fpm mapping into it")
+          out += ("deb:\n"
+                  "  fpm:\n"
+                  "    - \"howland-copyright=/usr/share/doc/howland/copyright\"\n")
           open("electron-builder.howland.yml", "w").write(out)
-          print("protocols -> howland://")
+          print("protocols -> howland://; copyright -> /usr/share/doc/howland/copyright")
           PYCFG
           cd ../..
           # deb metadata below MIRRORS packaging/kit/linux/deb.sh, the source of truth for it.
@@ -599,6 +633,32 @@ jobs:
           print(text)
           PY
           if [ "$SRC" != "$OUT" ]; then mv "$SRC" "$OUT"; fi
+
+      # ASSERT AT THE ARTEFACT, NEVER AT THE ARG STRING. A malformed fpm argument is IGNORED
+      # SILENTLY — that is the whole reason deb.fpm needed a condition attached — so the only
+      # honest check extracts the built package and looks. Three claims, and the third is the one
+      # a positive-only check would miss: the file is THERE, it SAYS the grant, and it did NOT
+      # leak into the AppImage.
+      - name: The deb carries its copyright where Debian looks
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb=$(find apps/desktop/dist-electron -maxdepth 1 -name '*.deb' | head -1)
+          [ -n "$deb" ] || { echo "::error::no .deb produced"; exit 1; }
+          root=$(mktemp -d)
+          dpkg-deb -x "$deb" "$root"
+          f="$root/usr/share/doc/howland/copyright"
+          [ -f "$f" ] || { echo "::error::no copyright at usr/share/doc/howland/copyright — the fpm mapping did not apply, and fpm would not have said so"; exit 1; }
+          for want in "Copyright Ayers Electronics Inc." "proprietary freeware" "at no charge" "not open source" "General Public License"; do
+            grep -qF "$want" "$f" || { echo "::error::copyright omits: $want"; exit 1; }
+          done
+          # NEGATIVE: /opt is where afterPack and extraFiles would have put it, and where nothing
+          # reads. A copy there means the mapping was replaced by one of those and looks fine.
+          if [ -e "$root/opt/Howland/howland-copyright" ] || [ -e "$root/opt/Howland/copyright" ]; then
+            echo "::error::a copyright landed under /opt — that is the directory nothing reads"; exit 1
+          fi
+          echo "copyright present at $f, states the grant, and /opt is clean"
 
       - name: Upload installers
         if: ${{ env.CAN_SHIP == 'true' }}

@@ -492,31 +492,16 @@ jobs:
           print("protocols -> howland://")
           PYCFG
           cd ../..
-          # THE deb METADATA BELOW EXISTS TO MATCH packaging/kit/linux/deb.sh, WHICH IS THE
-          # SOURCE OF TRUTH FOR IT. Every other package in the estate — both servers and Magpie's
-          # desktop — is built by that kit; THIS ONE IS NOT, and cannot be: the kit packages a
-          # payload it is handed and knows nothing of electron's layout (asar, resources/, the
-          # chrome-sandbox bit), and electron-builder also emits the latest-linux.yml feed the
-          # desktop updater consumes. Routing this deb through the kit would re-implement electron
-          # packaging and risk the updater feed to win five string fields; the trade is the wrong
-          # way round.
+          # deb metadata below MIRRORS packaging/kit/linux/deb.sh, the source of truth for it.
+          # This is the only package in the estate the kit does not build (it knows nothing of
+          # electron's layout, and electron-builder emits the latest-linux.yml updater feed), so
+          # the fields are matched by hand. Deliberate imitation, not redundancy — do not delete
+          # as duplicated defaults; if deb.sh changes one, change it here in the same pass.
           #
-          # So these are DELIBERATE IMITATION, not redundancy. Without this comment the next reader
-          # deletes them as duplicated defaults — which is how the fields diverged in the first
-          # place. If deb.sh changes any of them, change them here in the same pass.
-          #
-          # What the kit writes, at deb.sh's control heredoc: Section utils, Priority optional,
-          # Maintainer $PUBLISHER, Description $PRODUCT as a SHORT line with the copyright and the
-          # data-survives-removal note as the extended body, and License from the EULA grant. This
-          # package had an EMPTY short description and License: unknown before that comparison.
-          #
-          # OPTION NAMES ARE FROM THE SCHEMA, NOT FROM GUESSING — app-builder-lib 25.1.8,
-          # out/options/linuxOptions.d.ts. Two of them are traps: `linux.synopsis` is the DEBIAN
-          # SHORT DESCRIPTION and `linux.description` is the long one, so the empty short line is
-          # fixed by synopsis and not by description; and `linux.category` is the FREEDESKTOP MENU
-          # category, NOT the Debian Section — Section comes from `deb.packageCategory`. I had
-          # written linux.category for Section and it would have set a menu entry while leaving
-          # Section: default exactly as it was.
+          # Two option names are traps, both verified in app-builder-lib 25.1.8
+          # out/options/linuxOptions.d.ts: synopsis is the Debian SHORT description (description
+          # is the long one), and linux.category is the freedesktop MENU category — Section comes
+          # from deb.packageCategory.
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
             -c.productName=Howland -c.appId=com.howland.app \
             -c.extraMetadata.version="$VERSION" \

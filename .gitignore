@@ -69,3 +69,4 @@ transcript-analysis
 evals/results/
 .playwright-mcp/
 .vscode/
+apps/desktop/electron-builder.howland.yml

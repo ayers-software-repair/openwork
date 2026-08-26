@@ -445,16 +445,47 @@ jobs:
           esac
           echo "Stamping Howland app version: $VERSION"
           pnpm --filter @openwork/desktop run build:electron
-          # The howland:// protocol override is deliberately absent below. electron-builder's
-          # CLI dot-notation cannot express it: any index turns `protocols` from an array into
-          # an object and fails schema validation ("unknown property '0'" / "'1'"), and an
-          # unindexed form cannot produce the `schemes` ARRAY the schema requires. Both Linux
-          # legs died on it while mac and windows packaged happily on the same invalid config,
-          # which is how it survived a shipped release unnoticed. Registering upstream's scheme
-          # is a BRANDING GAP - tracked for a proper fix (a generated override config passed
-          # with --config), not a crash - so the train ships and the gap is written down rather
-          # than patched blind.
-          pnpm --dir apps/desktop exec electron-builder --config electron-builder.yml \
+          # THE howland:// PROTOCOL, via a GENERATED config rather than the CLI.
+          #
+          # electron-builder's dot-notation cannot express this option at all: any index turns
+          # `protocols` from an array into an object and fails schema validation ("unknown
+          # property '0'" / "'1'"), while an unindexed form cannot produce the `schemes` ARRAY
+          # the schema requires. Both Linux legs died on it, and mac and windows packaged
+          # happily on the same invalid config - which is how a Howland build shipped
+          # registering upstream's openwork:// scheme without anyone noticing.
+          #
+          # So the base config is DERIVED, not patched: upstream's file is copied and its
+          # protocols block replaced, and the copy is what packages. Upstream's own file is
+          # never edited, which keeps the branding rule (build-time overrides only, never a
+          # patch to upstream internals) and keeps the fork mergeable.
+          #
+          # The transform ASSERTS what it expects to find. A silent no-op here would put the
+          # branding gap straight back, and this is the second time this option has shipped
+          # wrong precisely because nothing checked.
+          cd apps/desktop
+          test -f electron-builder.yml
+          grep -q '^protocols:' electron-builder.yml \
+            || { echo "::error::electron-builder.yml has no protocols block - upstream changed it"; exit 1; }
+          python3 - <<'PYCFG'
+          import re, sys
+          src = open("electron-builder.yml").read()
+          block = re.compile(r"^protocols:\n(?:[ \t]+.*\n)+", re.M)
+          if not block.search(src):
+              sys.exit("::error::could not match the protocols block to replace")
+          out = block.sub("protocols:\n  - name: Howland\n    schemes:\n      - howland\n", src, count=1)
+          # Assert on the BLOCK, not the file head: `appId: com.differentai.openwork` lives up
+          # there too and is overridden on the CLI, so a file-wide search fails on a line that
+          # is supposed to say that. The first version of this check did exactly that.
+          written = block.search(out).group(0)
+          if "openwork" in written.lower():
+              sys.exit("::error::openwork survived inside the protocols block")
+          if "- howland" not in out:
+              sys.exit("::error::the howland scheme was not written")
+          open("electron-builder.howland.yml", "w").write(out)
+          print("protocols -> howland://")
+          PYCFG
+          cd ../..
+          pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
             -c.productName=Howland -c.appId=com.howland.app \
             -c.extraMetadata.version="$VERSION" \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \

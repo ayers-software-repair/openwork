@@ -450,7 +450,7 @@ jobs:
             -c.extraMetadata.version="$VERSION" \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
             -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
-            '-c.protocols.1.name=Howland' '-c.protocols.1.schemes.0=howland' \
+            '-c.protocols.0.name=Howland' '-c.protocols.0.schemes.0=howland' \
             -c.copyright="Copyright Ayers Electronics Inc. All rights reserved." \
             '-c.deb.maintainer=Ayers Electronics' \
             -c.linux.description="Howland - private, offline, self-hosted AI and survival library" \

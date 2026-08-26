@@ -99,12 +99,12 @@ jobs:
           echo "STAMP_VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 11.4.0
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           # See release.yml: pnpm's store keyed on the lockfile. This leg is on macos-latest at

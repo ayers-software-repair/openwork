@@ -17,7 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net as electronNet, Notification as ElectronNotification, session, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net as electronNet, Notification as ElectronNotification, screen, session, shell, systemPreferences } from "electron";
 import { configureFakeMediaForTests, installMediaPermissionHandlers } from "./media-permissions.mjs";
 import { registerMigrationIpc } from "./migration.mjs";
 import { createRuntimeManager } from "./runtime.mjs";
@@ -43,6 +43,13 @@ import {
   writeWindowsBrandShortcut,
   windowsIconFromNativeImage,
 } from "./brand-icon-windows.mjs";
+
+// The size the window WANTS, and the floor below which it stops being usable. Clamped to the
+// display's work area at construction — a preference, not a promise.
+const PREFERRED_WINDOW_WIDTH = 1180;
+const PREFERRED_WINDOW_HEIGHT = 820;
+const MIN_WINDOW_WIDTH = 800;
+const MIN_WINDOW_HEIGHT = 600;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -2088,9 +2095,25 @@ async function createMainWindow() {
     app.dock.setIcon(windowIconImage);
   }
 
+  // CC-33. The window was a FIXED 1180x820 that never asked how big the screen was: on a
+  // 1280x800 laptop 820 is taller than the work area, so it opened partly off-screen with no
+  // way to see it had. Not an inherited default — a chosen size that ignored the display.
+  //
+  // Only the TRANSFERABLE clause of magpie's CC-21 applies here: clamp to the work area, honour
+  // a minimum. Its 16:9 and its screen-fraction do NOT transfer — those are television-shaped
+  // because that client letterboxes video, and this is a tool window.
+  //
+  // screen.* is only safe after `app.whenReady()`, which is why this reads the display here at
+  // construction rather than at module scope.
+  const workArea = screen.getPrimaryDisplay().workAreaSize;
+  const initialWidth = Math.max(MIN_WINDOW_WIDTH, Math.min(PREFERRED_WINDOW_WIDTH, workArea.width));
+  const initialHeight = Math.max(MIN_WINDOW_HEIGHT, Math.min(PREFERRED_WINDOW_HEIGHT, workArea.height));
+
   mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 820,
+    width: initialWidth,
+    height: initialHeight,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     title: currentDisplayAppName,
     show: false,
     ...(process.platform === "win32" ? { skipTaskbar: true } : {}),

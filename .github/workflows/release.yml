@@ -561,9 +561,15 @@ jobs:
           # MERGED CONFIG BEFORE ANY PLATFORM WORK, so one bad name failed all six legs — two of
           # them after eight minutes of setup — and published nothing at all.
           #
-          # THE DEBIAN LICENCE FIELD IS NOT SET FROM HERE AND DOES NOT NEED TO BE: what dpkg
-          # leads a reader to is /usr/share/doc/howland/copyright, written by the deb.fpm path
-          # mapping above.
+          # THE LICENCE FIELD IS extraMetadata, NOT A LINUX OPTION — VERIFIED IN
+          # out/targets/FpmTarget.js:179, which reads packager.info.metadata.license and passes
+          # it to fpm as --license. That is why `linux.license` could never have worked: the
+          # value does not live under a platform key at all, so no amount of moving it between
+          # linux/deb/appImage would have found it. Without this the published debs read
+          # `License: unknown`, fpm's default for a field it always emits.
+          #
+          # What dpkg actually leads a reader to is /usr/share/doc/howland/copyright, written by
+          # the deb.fpm path mapping above; this field is the short label beside it.
           #
           # scripts/check-builder-flags.sh checks these names against the installed schema now,
           # because THIS COMMENT CLAIMING VERIFICATION IS WHAT MADE THE UNVERIFIED LINE LOOK
@@ -573,6 +579,7 @@ jobs:
             -c.extraMetadata.version="$VERSION" \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
             -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
+            -c.extraMetadata.license="Proprietary freeware" \
             -c.copyright="Copyright Ayers Electronics Inc. All rights reserved." \
             '-c.deb.maintainer=Ayers Electronics' \
             -c.linux.description="Howland - private, offline, self-hosted AI and survival library" \

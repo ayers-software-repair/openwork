@@ -445,12 +445,20 @@ jobs:
           esac
           echo "Stamping Howland app version: $VERSION"
           pnpm --filter @openwork/desktop run build:electron
+          # The howland:// protocol override is deliberately absent below. electron-builder's
+          # CLI dot-notation cannot express it: any index turns `protocols` from an array into
+          # an object and fails schema validation ("unknown property '0'" / "'1'"), and an
+          # unindexed form cannot produce the `schemes` ARRAY the schema requires. Both Linux
+          # legs died on it while mac and windows packaged happily on the same invalid config,
+          # which is how it survived a shipped release unnoticed. Registering upstream's scheme
+          # is a BRANDING GAP - tracked for a proper fix (a generated override config passed
+          # with --config), not a crash - so the train ships and the gap is written down rather
+          # than patched blind.
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.yml \
             -c.productName=Howland -c.appId=com.howland.app \
             -c.extraMetadata.version="$VERSION" \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
             -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
-            '-c.protocols.0.name=Howland' '-c.protocols.0.schemes.0=howland' \
             -c.copyright="Copyright Ayers Electronics Inc. All rights reserved." \
             '-c.deb.maintainer=Ayers Electronics' \
             -c.linux.description="Howland - private, offline, self-hosted AI and survival library" \

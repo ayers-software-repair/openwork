@@ -354,8 +354,20 @@ jobs:
         with:
           bun-version: 1.3.10
 
+      # CC-40: UNCONDITIONAL, because :309 says every leg BUILDS and only shipping is gated.
+      #
+      # This step used to carry `if: env.CAN_SHIP == 'true'`, which made the code disagree with
+      # that comment. It did NOT leave unsigned legs without modules — the packaging step is
+      # ungated, and pnpm installs implicitly when it runs, reading the lockfile ("Lockfile is up
+      # to date, resolution step is skipped" appears inside that step's own log on an unsigned
+      # macOS leg). So the unsigned artifact was real and lockfile-driven.
+      #
+      # WHAT IT LOST WAS `--frozen-lockfile`, AND THAT DIFFERENCE ONLY SHOWS UP ON THE BAD DAY:
+      # frozen FAILS when the lockfile is out of date with package.json; an implicit install
+      # quietly resolves and carries on. So on the one run where they disagree, the signed legs
+      # stop loudly and the unsigned legs — the ones handed to a tester precisely to be trusted —
+      # build from a tree nobody pinned and say nothing. Both paths install the same way now.
       - name: Install dependencies
-        if: ${{ env.CAN_SHIP == 'true' }}
         run: pnpm install --frozen-lockfile
 
       # THE -c. OVERRIDE NAMES ARE REAL OPTIONS. This is the first point the schema exists on the
@@ -363,8 +375,11 @@ jobs:
       # same on every leg: electron-builder validates the MERGED config, so a bad name is a
       # property of the command line and not of the platform — which is exactly why one of them
       # failed all six legs, two of them eight minutes in, and published nothing.
+      # Not gated on CAN_SHIP either, and for the same reason: the packaging step runs on legs
+      # that cannot ship, so a bad override name breaks THEM too — and an unsigned leg failing
+      # with a raw electron-builder schema dump is exactly the report nobody can act on.
       - name: The electron-builder overrides name real options
-        if: ${{ env.CAN_SHIP == 'true' && runner.os == 'Linux' }}
+        if: ${{ runner.os == 'Linux' }}
         run: ./scripts/check-builder-flags.sh
 
       # --- macOS signing (soft-fail) --------------------------------------------------------

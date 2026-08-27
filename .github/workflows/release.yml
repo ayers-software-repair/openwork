@@ -2,7 +2,7 @@ name: Release Howland
 
 # ONE DISPATCH BUILDS EVERY HEAD THE RELEASE PAGE CARRIES. Desktop (six OS/arch legs) and Android
 # build from this one workflow and publish onto the SAME howland-v<version> release, the way
-# Neptune's release.yml does. Howland was split across separate desktop and mobile workflows; that
+# Magpie's release.yml does. Howland was split across separate desktop and mobile workflows; that
 # asymmetry is gone (owner ruling 2026-08-25). The server publishes onto the same release from the
 # howland repo — a different repo, so that stays its own workflow.
 #
@@ -47,7 +47,7 @@ on:
       # SELECTIVE BUILDS (owner order 2026-08-25: "test the Mac server first, then widen").
       # One boolean per platform, DEFAULT TRUE, and a tag push carries no inputs at all — so
       # every gate treats EMPTY as true. The naive `if: inputs.heads_macos` is false on a tag
-      # push and would silently ship nothing on the event that matters most (neptune's catch;
+      # push and would silently ship nothing on the event that matters most (magpie's catch;
       # both products use the same gate expression, names and defaults).
       heads_macos:
         description: 'Build the macOS desktop heads'
@@ -462,7 +462,7 @@ jobs:
           # the updater, so a machine on the 1.0.0 release would see itself as 0.17.20 and be offered a
           # bogus "update" to what it already runs. extraMetadata overrides the version at pack time so
           # electron-builder.yml / package.json stay untouched and upstream still merges. Version-locked
-          # to 1.0.0 until production is declared (mirrors Neptune's <Version>1.0.0</Version>); once a
+          # to 1.0.0 until production is declared (mirrors Magpie's <Version>1.0.0</Version>); once a
           # real tag drives it (howland-v1.2.3), that flows through here automatically.
           # CANONICAL version derivation — identical in all four stamp sites across the two
           # workflows (this file x3, ios-submission x1). Two drifted variants once coexisted;
@@ -765,7 +765,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      # Uniform decide-and-record, identical in shape to the desktop legs and to Neptune's.
+      # Uniform decide-and-record, identical in shape to the desktop legs and to Magpie's.
       # No keystore means this leg publishes nothing and says which secret would change that;
       # the run stays green and the release job renders the reason.
       - name: Decide whether this leg can ship
@@ -1030,7 +1030,7 @@ jobs:
       # server's nine come from the howland repo onto the same release. An asset whose
       # distribution channel is NOT the release page is deliberately absent from this list
       # rather than being a permanent "not built" line — the iOS .ipa goes to App Store
-      # Connect. (Agreed with neptune-go-live; their Roku and watch-web zips are excluded by
+      # Connect. (Agreed with magpie-go-live; their Roku and watch-web zips are excluded by
       # the same rule.)
       - name: Collect what was built
         run: |
@@ -1078,7 +1078,7 @@ jobs:
       # release does not carry fails `sha256sum -c` for every user who checks. Written last so
       # neither manifest can describe itself.
       #
-      # SUBSET RULE (agreed with neptune, owner design): the DESKTOP manifest spans three
+      # SUBSET RULE (agreed with magpie, owner design): the DESKTOP manifest spans three
       # platforms, so a subset run must NOT regenerate it — softprops would overwrite the full
       # published manifest with one describing only this run's platforms, and every user
       # verifying an untouched, perfectly valid asset would be told it is not in the manifest.
@@ -1154,7 +1154,7 @@ jobs:
       #
       # The expected list NARROWS with the heads_ selection — a deselected platform was never
       # going to build, which is a different fact from both of the above and gets NO line and
-      # NO skip record (agreed with neptune). The manifests are release-level artifacts: the
+      # NO skip record (agreed with magpie). The manifests are release-level artifacts: the
       # desktop manifest is expected only on a full desktop selection (see the checksum step),
       # the Android manifest whenever Android is selected.
       - name: Reconcile against the expected assets

@@ -250,3 +250,75 @@ test("every declared name parses as the grammar or is a documented exception", (
     assert.ok(grammarArches.has(m[3]), `${a.name} names an unknown arch ${m[3]}`);
   }
 });
+
+// A4: ARCH COMPLETENESS. THE ONE RULE A BOTH-DIRECTIONS BIND CANNOT ENFORCE.
+//
+// Every check above compares the declaration to the workflows. A MISSING ARCHITECTURE IS ABSENT
+// FROM BOTH, so it is invisible to all of them, and the file passes while describing a train with
+// a hole in it. That is the list-versus-matrix problem one level up: the binding proves the two
+// documents agree, not that either is complete.
+//
+// PROVEN LIVE, NOT HYPOTHETICAL. magpie/packaging/platforms.json -- the newest declaration in the
+// estate, written after every lesson here -- declares Magpie-Desktop-Windows-x64.exe with no
+// arm64, and Magpie-Desktop-macOS-arm64.dmg with no x64. Neither is shipping, conditional, or
+// planned; they are nowhere. In that same file the SERVER component is arch-complete on all three
+// platforms. One file, two components, one of them complete.
+//
+// The rule extends the naming grammar from names to coverage. The grammar made arch EXPLICIT IN A
+// NAME so a second build could never silently rename the first. This makes arch EXPLICIT IN
+// COVERAGE so a second build can never silently be missing: name one arch of a platform for a
+// component, and you owe an entry for the other -- shipping, planned with a reason, or declared
+// not-applicable with a reason. Silence stops being an option, which is the only thing that turns
+// a list into a matrix.
+const archesExpected = { macOS: ["x64", "arm64"], Windows: ["x64", "arm64"], Linux: ["x64", "arm64"] };
+
+// THE CELL IS READ OUT OF THE NAME, NOT OUT OF A FIELD, AND THAT IS THE PORTABLE PART. The
+// grammar already puts component, platform and arch in every asset name -- that is what it is
+// FOR -- so the completeness rule needs no schema agreement to run. magpie's declaration is
+// shaped {name: {state}} with no platform or arch fields at all and a `planned` list of bare
+// product heads; a rule that read fields would report zero findings there and look like a pass.
+// It was written against fields first and did exactly that.
+function cell(name) {
+  // A documented grammar exception is not a cell. Magpie-ffmpeg-macOS-src.tar.xz parses as
+  // component=ffmpeg, platform=macOS, arch=src and would be reported as two missing arches for a
+  // source tarball that has none -- a false finding sitting beside two true ones, which is how a
+  // correct rule gets deleted for being noisy. The exceptions are consulted FIRST, so an asset
+  // outside the grammar is outside the matrix, and every name still inside it is guaranteed by
+  // the grammar test to carry a real arch.
+  if (grammarExceptions[name] !== undefined) return null;
+  const m = /^[A-Za-z]+-([A-Za-z]+)-([A-Za-z]+)-([A-Za-z0-9]+)\.[A-Za-z0-9.]+$/.exec(name);
+  if (!m) return null;
+  const [, component, platform, arch] = m;
+  return archesExpected[platform] ? { component, platform, arch } : null;
+}
+
+test("a component that ships one arch of a platform declares the other", () => {
+  const covered = new Map(); // "component|platform" -> Set(arch)
+  const note = (name) => {
+    const c = cell(name);
+    if (!c) return;
+    const key = `${c.component}|${c.platform}`;
+    if (!covered.has(key)) covered.set(key, new Set());
+    covered.get(key).add(c.arch);
+  };
+  for (const a of declaration.assets) note(a.name);
+  for (const p of declaration.planned ?? []) note(p.name);
+  for (const na of declaration.notApplicable ?? []) {
+    assert.ok((na.why ?? "").trim() !== "", `${na.name} is declared not-applicable with no reason`);
+    note(na.name);
+  }
+
+  assert.ok(covered.size >= 3, `only ${covered.size} component/platform pairs parsed out of the declared names — this check is reading nothing`);
+
+  for (const [key, arches] of covered) {
+    const [component, platform] = key.split("|");
+    for (const arch of archesExpected[platform]) {
+      assert.ok(
+        arches.has(arch),
+        `${component} ships ${platform} ${[...arches].join("+")} and declares nothing for ${arch} — ` +
+          `an arch that is neither built, planned, nor declared not-applicable is INVISIBLE: it is ` +
+          `absent from the workflow and from this file, so every both-directions check above passes`,
+      );
+    }
+  }
+});

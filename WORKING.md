@@ -52,6 +52,17 @@ onto the one `howland-v1.0.0` release of `ayers-software-repair/howland-releases
 
 ## Open here
 
+- **`release.yml:749` uses `ls *.appx 2>/dev/null | head -1`** — the SIGPIPE-abortable pipe this
+  repo already paid for at `:657`. Safe TODAY because the appx target emits exactly one file per
+  leg, so `head -1` never closes the pipe early. It stops being safe the moment a second .appx
+  appears (a per-arch split, a second target). Replace with a glob-into-array read rather than a
+  pipe when that happens. Recorded on cto's word: not a blocker, not to be fixed mid-lane.
+- **actionlint is not installed on this box and sessions never install** (`~/source/CLAUDE.md`).
+  Every workflow edit in this fork this session was verified by `yaml.safe_load` plus a structural
+  read of the parsed job graph — NOT by actionlint. Two cards asked for actionlint-clean as
+  evidence and it is OWED, not produced. It belongs in `dotfiles/bootstrap.sh`, which is where
+  missing tooling routes.
+
 - PAT scope for the chain: dispatching howland's server-release needs `actions:write` on the
   howland repo (fails loudly at the chain step if absent).
 - The mobile scaffold has never run end-to-end in CI (native projects are generated at build

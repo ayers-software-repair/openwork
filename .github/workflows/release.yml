@@ -110,6 +110,14 @@ jobs:
       # per-platform selection has to shape the MATRIX — a deselected macOS leg that merely
       # exits early still spins up a 10x-billed runner to decide not to work. Empty inputs
       # (a tag push) select everything.
+      # THE DECLARATION GATES THE RUN. packaging/platforms.json states what this fork builds and
+      # packaging/platforms.test.mjs holds this workflow to it in both directions. It also runs on
+      # every push (contract.yml), which is where a break should be caught -- this call is here so
+      # a dispatch cannot route around it, because the release is the moment the answer costs
+      # money. node --test, no dependencies, so it adds seconds rather than a pnpm install.
+      - name: The declaration agrees with the workflows
+        run: node --test packaging/platforms.test.mjs
+
       - name: Select the desktop legs to build
         id: select
         env:

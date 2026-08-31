@@ -1,0 +1,50 @@
+name: Release contract
+
+# THIS IS NOT ONE OF THE TWENTY. Commit 2fa361016 deleted every upstream workflow this fork
+# inherited -- enterprise images, Daytona, Den, AUR, nightly evals, the generic-installer train --
+# because each one was A LIVE PUBLISH PATH on this fork the day Actions was funded. That decision
+# stands, and this workflow is deliberately shaped so it cannot become the thing that was deleted:
+#
+#   - it has NO publish, upload, release, tag, dispatch or registry step, and never will;
+#   - `permissions: contents: read` is the whole grant;
+#   - it is guarded on github.repository like the other two, so a fork of this fork runs nothing;
+#   - there is NO `schedule:` trigger, ever (fork law).
+#
+# What it does: run the release contract on every push and pull request, so a change that breaks
+# the agreement between packaging/platforms.json and the two workflows is caught by the change
+# that broke it. The same check runs inside release.yml's preflight, so a dispatch cannot route
+# around it -- ONE SCRIPT, TWO CALLERS, never a copy in each.
+#
+# It exists because the fork had no test CI at all after 2fa361016, which meant a checked-in test
+# would have run nowhere. A CHECK NOTHING RUNS IS THE DEFECT THE DECLARATION EXISTS TO END,
+# one level up.
+
+on:
+  push:
+    branches: [howland]
+  pull_request:
+    branches: [howland]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: howland-release-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    if: github.repository == 'ayers-software-repair/openwork'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # node --test is in the runtime; no pnpm install, no workspace, no lockfile. The contract
+      # must be checkable without standing the workspace up, because the cheapest check is the one
+      # that actually gets run.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: The declaration agrees with the workflows
+        run: node --test packaging/platforms.test.mjs

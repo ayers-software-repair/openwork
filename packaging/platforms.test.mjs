@@ -96,8 +96,19 @@ function artifactOnlyAssets() {
 
 // The store head, in its own workflow on its own dispatch. Its .ipa is never a release asset.
 function storeAssets() {
-  const wf = workflowWithoutComments("ios-submission.yml");
-  const names = new Set(wf.match(/Howland-[A-Za-z0-9.-]+\.ipa\b/g) ?? []);
+  // TWO STORES, TWO WORKFLOWS. This read ios-submission.yml only and matched only .ipa, which
+  // made "store channel" a synonym for "iOS" — so a Windows Store package could be declared,
+  // built and renamed and the contract would still report that no workflow names it. The channel
+  // is a DESTINATION, not a platform, and the parser has to know every workflow that reaches it.
+  const names = new Set();
+  for (const m of workflowWithoutComments("ios-submission.yml").match(/Howland-[A-Za-z0-9.-]+\.ipa\b/g) ?? []) {
+    names.add(m);
+  }
+  // .appx is built on the desktop leg in release.yml and collected as an Actions artifact only.
+  // take() globs by extension and no glob names .appx, so it cannot reach the release directory.
+  for (const m of workflowWithoutComments("release.yml").match(/Howland-[A-Za-z0-9.-]+\.appx\b/g) ?? []) {
+    names.add(m);
+  }
   return names;
 }
 

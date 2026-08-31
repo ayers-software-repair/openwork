@@ -50,6 +50,20 @@ onto the one `howland-v1.0.0` release of `ayers-software-repair/howland-releases
 - Upstream analytics are killed at build time (empty VITE_OPENWORK_POSTHOG_KEY).
 - PRs target `dev` upstream-style; prove UI flows with `pnpm fraimz --flow <id>`.
 
+## Rulings this fork runs on (not derivable from the code)
+
+- **Windows Store is a target for BOTH products** (owner, 2026-08-31). This OVERRULES the earlier
+  "stores = Apple + Play only" scope line, which a seat may still have in its notes. The target is
+  **`appx`, not `msix`** — electron-builder 25.1.8 has exactly one Windows Store target
+  (`app-builder-lib/out/targets/AppxTarget.js:46` `super("appx")`); there is no msix target and the
+  Store accepts `.appx`.
+- **There is no Amazon flavor.** Amazon accepts a standard APK, so a second Amazon-named asset
+  would be a different name for identical bytes. One APK serves Amazon and sideload.
+- **Building is never gated on signing** (owner, 2026-08-31). A leg builds regardless of
+  certificates; only PUBLICATION is gated. Unsigned output uploads under an `unsigned-` artifact
+  name that the release job's `take()` excludes by path. Android's unsigned form is a DEBUG-SIGNED
+  APK, because an unsigned release APK is a file no device installs — an artifact in name only.
+
 ## Open here
 
 - **`release.yml:749` uses `ls *.appx 2>/dev/null | head -1`** — the SIGPIPE-abortable pipe this

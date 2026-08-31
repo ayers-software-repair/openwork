@@ -789,9 +789,9 @@ jobs:
             echo "CAN_SHIP=false" >> "$GITHUB_ENV"
             mkdir -p skips
             for asset in $owed; do
-              printf 'no %s, so the Android leg did not build\n' "$missing" > "skips/$asset.txt"
+              printf 'built UNSIGNED (debug-signed) and uploaded as an Actions artifact only: no %s\n' "$missing" > "skips/$asset.txt"
             done
-            echo "Android is not shipping: no $missing"
+            echo "Android builds unsigned and is not shipping to the page: no $missing"
           else
             echo "CAN_SHIP=true" >> "$GITHUB_ENV"
             echo "Android signing secrets present."
@@ -806,13 +806,11 @@ jobs:
 
 
       - name: Setup pnpm
-        if: ${{ env.CAN_SHIP == 'true' }}
         uses: pnpm/action-setup@v6
         with:
           version: 11.4.0
 
       - name: Setup Node
-        if: ${{ env.CAN_SHIP == 'true' }}
         uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -823,7 +821,6 @@ jobs:
           cache: pnpm
 
       - name: Setup Java
-        if: ${{ env.CAN_SHIP == 'true' }}
         uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -834,11 +831,9 @@ jobs:
       # android-actions/setup-android here before the Gradle build.
 
       - name: Stage the mobile web bundle
-        if: ${{ env.CAN_SHIP == 'true' }}
         uses: ./.github/actions/stage-mobile-web
 
       - name: Add + sync Android platform
-        if: ${{ env.CAN_SHIP == 'true' }}
         working-directory: mobile
         run: |
           # No exists-guard: mobile/.gitignore ignores the native trees by design, so the
@@ -851,7 +846,6 @@ jobs:
       # interim renders of the current parrot (mobile/assets/); the brand pipeline's output
       # replaces them on mark approval.
       - name: Generate the Android app icons
-        if: ${{ env.CAN_SHIP == 'true' }}
         working-directory: mobile
         run: npx @capacitor/assets generate --android --iconBackgroundColor '#0a1628' --iconBackgroundColorDark '#0a1628'
 
@@ -861,7 +855,6 @@ jobs:
       # (locked 1.0.0 until production); versionCode is the run number because store build
       # codes must INCREASE even when the display version does not (the rebuild loop).
       - name: Stamp Android version
-        if: ${{ env.CAN_SHIP == 'true' }}
         working-directory: mobile
         env:
           RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -886,7 +879,6 @@ jobs:
       # NSAllowsLocalNetworking can) and references it from the manifest instead of the old
       # blanket android:usesCleartextTraffic="true" flag on <application>.
       - name: Allow self-hosted http servers (Android)
-        if: ${{ env.CAN_SHIP == 'true' }}
         working-directory: mobile
         run: |
           set -euo pipefail
@@ -999,6 +991,34 @@ jobs:
           name: mobile-android
           if-no-files-found: error
           path: mobile-artifacts/*
+
+      # BUILDING IS NEVER GATED ON SIGNING (owner law 2026-08-31): with no keystore the leg
+      # still builds — as a DEBUG-SIGNED APK, because that is the only unsigned form a person
+      # can actually install; an unsigned release APK/AAB is a file no device accepts, which
+      # is an artifact in name only. It uploads under an `unsigned-` artifact name, the
+      # directory the release job's take() excludes BY PATH, so it can never reach the page.
+      # The tester fetches it from the run; it reaches the release the day the keystore lands.
+      - name: Build Android (unsigned, debug-signed APK)
+        if: ${{ env.CAN_SHIP != 'true' }}
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Stage unsigned Android artifact
+        if: ${{ env.CAN_SHIP != 'true' }}
+        run: |
+          mkdir -p unsigned-mobile
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk unsigned-mobile/Howland-Client-Android-debug.apk
+          ls -la unsigned-mobile
+
+      - name: Upload unsigned Android artifact
+        if: ${{ env.CAN_SHIP != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-android
+          if-no-files-found: error
+          path: unsigned-mobile/*
   release:
     # Every head, one publish. `always()` because a leg that could not sign still ends green and
     # a leg that FAILED must not silently take the publish with it — the reconciliation below is

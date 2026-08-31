@@ -731,6 +731,28 @@ jobs:
           fi
           echo "copyright present at $f, states the grant, and /opt is clean"
 
+      # THE STORE PACKAGE GETS ITS STABLE NAME IN THE LEG, not in the release job's take().
+      # take() renames on the way to the RELEASE DIRECTORY and .appx never goes there, so an appx
+      # left with electron-builder's own artifactName (openwork-win-x64-<version>.appx) would
+      # reach a tester under a name the grammar does not know and the declaration cannot bind.
+      # Renaming here is what lets packaging/platforms.json name it at all.
+      - name: Name the Windows Store package
+        if: ${{ startsWith(matrix.artifact, 'windows') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd apps/desktop/dist-electron
+          case "${{ matrix.artifact }}" in
+            windows)       want=Howland-Desktop-Windows-x64.appx ;;
+            windows-arm64) want=Howland-Desktop-Windows-arm64.appx ;;
+          esac
+          src=$(ls *.appx 2>/dev/null | head -1)
+          # An absent appx is a BUILD failure, not a naming one: the target is declared
+          # unconditionally, so nothing legitimately produces zero of them.
+          test -n "$src" || { echo "::error::appx target produced nothing"; exit 1; }
+          [ "$src" = "$want" ] || mv "$src" "$want"
+          ls -la "$want"
+
       - name: Upload installers
         if: ${{ env.CAN_SHIP == 'true' }}
         uses: actions/upload-artifact@v7
@@ -746,6 +768,7 @@ jobs:
             apps/desktop/dist-electron/*.AppImage
             apps/desktop/dist-electron/*.deb
             apps/desktop/dist-electron/*.exe
+            apps/desktop/dist-electron/*.appx
             apps/desktop/dist-electron/latest*.yml
 
       # THE UNSIGNED TWIN. Same installers, different artifact NAME, and that name is the whole
@@ -769,6 +792,8 @@ jobs:
             apps/desktop/dist-electron/*.AppImage
             apps/desktop/dist-electron/*.deb
             apps/desktop/dist-electron/*.exe
+            # STORE CHANNEL, same as the signed path: never released either way.
+            apps/desktop/dist-electron/*.appx
             apps/desktop/dist-electron/latest*.yml
 
   build-android:

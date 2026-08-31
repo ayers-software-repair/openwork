@@ -36,53 +36,191 @@
     "there is."
   ],
   "assets": [
-    { "name": "Howland-Desktop-Linux-x64.AppImage",   "platform": "linux",   "arch": "x64",   "channel": "release",  "published": true },
-    { "name": "Howland-Desktop-Linux-x64.deb",        "platform": "linux",   "arch": "x64",   "channel": "release",  "published": true },
-    { "name": "Howland-Desktop-Linux-arm64.AppImage", "platform": "linux",   "arch": "arm64", "channel": "release",  "published": true },
-    { "name": "Howland-Desktop-Linux-arm64.deb",      "platform": "linux",   "arch": "arm64", "channel": "release",  "published": true },
-    { "name": "latest-linux.yml",                     "platform": "linux",   "arch": "x64",   "channel": "release",  "published": true },
-    { "name": "latest-linux-arm64.yml",               "platform": "linux",   "arch": "arm64", "channel": "release",  "published": true },
-    { "name": "Howland-Desktop-CHECKSUMS.txt",        "platform": "any",     "arch": "any",   "channel": "release",  "published": true },
-
-    { "name": "Howland-Desktop-macOS-arm64.dmg",      "platform": "macos",   "arch": "arm64", "channel": "release",  "published": false,
-      "why": "unsigned, not notarized: no APPLE_DESKTOP_CERT_P12_BASE64 / APPLE_NOTARY_KEY_P8. Builds every run and uploads as unsigned-<leg>; reaches the page the day the certificate lands." },
-    { "name": "Howland-Desktop-macOS-arm64.zip",      "platform": "macos",   "arch": "arm64", "channel": "release",  "published": false,
-      "why": "the update payload for latest-mac.yml, gated by the same certificate as its .dmg." },
-    { "name": "Howland-Desktop-macOS-x64.dmg",        "platform": "macos",   "arch": "x64",   "channel": "release",  "published": false,
-      "why": "unsigned, not notarized: no APPLE_DESKTOP_CERT_P12_BASE64 / APPLE_NOTARY_KEY_P8. Builds every run and uploads as unsigned-<leg>." },
-    { "name": "Howland-Desktop-macOS-x64.zip",        "platform": "macos",   "arch": "x64",   "channel": "release",  "published": false,
-      "why": "the update payload for latest-mac-x64.yml, gated by the same certificate as its .dmg." },
-    { "name": "latest-mac.yml",                       "platform": "macos",   "arch": "arm64", "channel": "release",  "published": false,
-      "why": "the updater feed rides with the payload it names; an unsigned leg's feed is excluded by artifact path with the binaries it describes." },
-    { "name": "latest-mac-x64.yml",                   "platform": "macos",   "arch": "x64",   "channel": "release",  "published": false,
-      "why": "see latest-mac.yml." },
-
-    { "name": "Howland-Desktop-Windows-x64.exe",      "platform": "windows", "arch": "x64",   "channel": "release",  "published": false,
-      "why": "unsigned: no WINDOWS_CERT_PFX_BASE64. Builds every run and uploads as unsigned-<leg>; SmartScreen warns on reputation, which an unsigned binary can never accrue." },
-    { "name": "Howland-Desktop-Windows-arm64.exe",    "platform": "windows", "arch": "arm64", "channel": "release",  "published": false,
-      "why": "unsigned: no WINDOWS_CERT_PFX_BASE64. Builds every run and uploads as unsigned-<leg>." },
-    { "name": "latest.yml",                           "platform": "windows", "arch": "x64",   "channel": "release",  "published": false,
-      "why": "see latest-mac.yml." },
-    { "name": "latest-arm64.yml",                     "platform": "windows", "arch": "arm64", "channel": "release",  "published": false,
-      "why": "see latest-mac.yml." },
-
-    { "name": "Howland-Client-Android.apk",           "platform": "android", "arch": "any",   "channel": "release",  "published": false,
-      "why": "no ANDROID_KEYSTORE_BASE64 / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD / ANDROID_STORE_PASSWORD. Sideload is a real channel for an offline-first product, so this publishes the day the keystore lands. THIS ONE FILE IS ALSO THE AMAZON APPSTORE ARTIFACT -- Amazon accepts a standard APK, so a second Amazon-named asset would declare a different name for identical bytes. magpie states the same thing at release.yml:273, 'AAB (Play) + APK (Amazon + sideload)', and the uniformity law is the reason to say it the same way rather than invent a flavour here." },
-    { "name": "Howland-Client-Android.aab",           "platform": "android", "arch": "any",   "channel": "release",  "published": false,
-      "why": "the Play store-submission artifact; gated by the same keystore as the .apk." },
-    { "name": "Howland-Client-CHECKSUMS.txt",         "platform": "any",     "arch": "any",   "channel": "release",  "published": false,
-      "why": "the checksum manifest rides with the binaries it describes: if they do not publish, neither does it, for the same reason." },
-
-    { "name": "Howland-Client-Android-debug.apk",     "platform": "android", "arch": "any",   "channel": "artifact", "published": false,
-      "why": "NEVER a release asset, by design. It is the unsigned twin, debug-signed because that is the only unsigned form a device will install -- an unsigned release APK is an artifact in name only. Uploads as unsigned-android, which the release job's take() excludes by path. It is how the owner tests before any certificate exists." },
-
-    { "name": "Howland-Client-iOS-arm64.ipa",         "platform": "ios",     "arch": "arm64", "channel": "store",    "published": false,
-      "why": "NEVER a release asset, by policy, not for want of a certificate. App Store Connect is its channel; an .ipa on a public download page installs for nobody and is exposure with no upside. It is a 90-day Actions artifact behind authentication, which is the private hand-off the upload needs." }
+    {
+      "name": "Howland-Desktop-Linux-x64.AppImage",
+      "platform": "linux",
+      "arch": "x64",
+      "channel": "release",
+      "published": true
+    },
+    {
+      "name": "Howland-Desktop-Linux-x64.deb",
+      "platform": "linux",
+      "arch": "x64",
+      "channel": "release",
+      "published": true
+    },
+    {
+      "name": "Howland-Desktop-Linux-arm64.AppImage",
+      "platform": "linux",
+      "arch": "arm64",
+      "channel": "release",
+      "published": true
+    },
+    {
+      "name": "Howland-Desktop-Linux-arm64.deb",
+      "platform": "linux",
+      "arch": "arm64",
+      "channel": "release",
+      "published": true
+    },
+    {
+      "name": "latest-linux.yml",
+      "platform": "linux",
+      "arch": "x64",
+      "channel": "release",
+      "published": true
+    },
+    {
+      "name": "latest-linux-arm64.yml",
+      "platform": "linux",
+      "arch": "arm64",
+      "channel": "release",
+      "published": true
+    },
+    {
+      "name": "Howland-Desktop-CHECKSUMS.txt",
+      "platform": "any",
+      "arch": "any",
+      "channel": "release",
+      "published": true
+    },
+    {
+      "name": "Howland-Desktop-macOS-arm64.dmg",
+      "platform": "macos",
+      "arch": "arm64",
+      "channel": "release",
+      "published": false,
+      "why": "unsigned, not notarized: no APPLE_DESKTOP_CERT_P12_BASE64 / APPLE_NOTARY_KEY_P8. Builds every run and uploads as unsigned-<leg>; reaches the page the day the certificate lands."
+    },
+    {
+      "name": "Howland-Desktop-macOS-arm64.zip",
+      "platform": "macos",
+      "arch": "arm64",
+      "channel": "release",
+      "published": false,
+      "why": "the update payload for latest-mac.yml, gated by the same certificate as its .dmg."
+    },
+    {
+      "name": "Howland-Desktop-macOS-x64.dmg",
+      "platform": "macos",
+      "arch": "x64",
+      "channel": "release",
+      "published": false,
+      "why": "unsigned, not notarized: no APPLE_DESKTOP_CERT_P12_BASE64 / APPLE_NOTARY_KEY_P8. Builds every run and uploads as unsigned-<leg>."
+    },
+    {
+      "name": "Howland-Desktop-macOS-x64.zip",
+      "platform": "macos",
+      "arch": "x64",
+      "channel": "release",
+      "published": false,
+      "why": "the update payload for latest-mac-x64.yml, gated by the same certificate as its .dmg."
+    },
+    {
+      "name": "latest-mac.yml",
+      "platform": "macos",
+      "arch": "arm64",
+      "channel": "release",
+      "published": false,
+      "why": "the updater feed rides with the payload it names; an unsigned leg's feed is excluded by artifact path with the binaries it describes."
+    },
+    {
+      "name": "latest-mac-x64.yml",
+      "platform": "macos",
+      "arch": "x64",
+      "channel": "release",
+      "published": false,
+      "why": "see latest-mac.yml."
+    },
+    {
+      "name": "Howland-Desktop-Windows-x64.exe",
+      "platform": "windows",
+      "arch": "x64",
+      "channel": "release",
+      "published": false,
+      "why": "unsigned: no WINDOWS_CERT_PFX_BASE64. Builds every run and uploads as unsigned-<leg>; SmartScreen warns on reputation, which an unsigned binary can never accrue."
+    },
+    {
+      "name": "Howland-Desktop-Windows-arm64.exe",
+      "platform": "windows",
+      "arch": "arm64",
+      "channel": "release",
+      "published": false,
+      "why": "unsigned: no WINDOWS_CERT_PFX_BASE64. Builds every run and uploads as unsigned-<leg>."
+    },
+    {
+      "name": "latest.yml",
+      "platform": "windows",
+      "arch": "x64",
+      "channel": "release",
+      "published": false,
+      "why": "see latest-mac.yml."
+    },
+    {
+      "name": "latest-arm64.yml",
+      "platform": "windows",
+      "arch": "arm64",
+      "channel": "release",
+      "published": false,
+      "why": "see latest-mac.yml."
+    },
+    {
+      "name": "Howland-Client-Android.apk",
+      "platform": "android",
+      "arch": "any",
+      "channel": "release",
+      "published": false,
+      "why": "no ANDROID_KEYSTORE_BASE64 / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD / ANDROID_STORE_PASSWORD. Sideload is a real channel for an offline-first product, so this publishes the day the keystore lands. THIS ONE FILE IS ALSO THE AMAZON APPSTORE ARTIFACT -- Amazon accepts a standard APK, so a second Amazon-named asset would declare a different name for identical bytes. magpie states the same thing at release.yml:273, 'AAB (Play) + APK (Amazon + sideload)', and the uniformity law is the reason to say it the same way rather than invent a flavour here."
+    },
+    {
+      "name": "Howland-Client-Android.aab",
+      "platform": "android",
+      "arch": "any",
+      "channel": "release",
+      "published": false,
+      "why": "the Play store-submission artifact; gated by the same keystore as the .apk."
+    },
+    {
+      "name": "Howland-Client-CHECKSUMS.txt",
+      "platform": "any",
+      "arch": "any",
+      "channel": "release",
+      "published": false,
+      "why": "the checksum manifest rides with the binaries it describes: if they do not publish, neither does it, for the same reason."
+    },
+    {
+      "name": "Howland-Client-Android-debug.apk",
+      "platform": "android",
+      "arch": "any",
+      "channel": "artifact",
+      "published": false,
+      "why": "NEVER a release asset, by design. It is the unsigned twin, debug-signed because that is the only unsigned form a device will install -- an unsigned release APK is an artifact in name only. Uploads as unsigned-android, which the release job's take() excludes by path. It is how the owner tests before any certificate exists."
+    },
+    {
+      "name": "Howland-Client-iOS-arm64.ipa",
+      "platform": "ios",
+      "arch": "arm64",
+      "channel": "store",
+      "published": false,
+      "why": "NEVER a release asset, by policy, not for want of a certificate. App Store Connect is its channel; an .ipa on a public download page installs for nobody and is exposure with no upside. It is a 90-day Actions artifact behind authentication, which is the private hand-off the upload needs."
+    },
+    {
+      "name": "Howland-Desktop-Windows-x64.appx",
+      "platform": "windows",
+      "arch": "x64",
+      "channel": "store",
+      "published": false,
+      "why": "Windows Store package. Built on the existing windows-latest leg and collected as an Actions artifact ONLY \u2014 never the release page, until a Partner Center identity exists. appx builds without identityName/publisher/applicationId: those are needed to SUBMIT, not to package."
+    },
+    {
+      "name": "Howland-Desktop-Windows-arm64.appx",
+      "platform": "windows",
+      "arch": "arm64",
+      "channel": "store",
+      "published": false,
+      "why": "Windows Store package. Built on the existing windows-latest leg and collected as an Actions artifact ONLY \u2014 never the release page, until a Partner Center identity exists. appx builds without identityName/publisher/applicationId: those are needed to SUBMIT, not to package."
+    }
   ],
-  "planned": [
-    { "name": "Howland-Desktop-Windows-x64.appx", "platform": "windows", "arch": "x64", "channel": "store",
-      "why": "no leg exists. Owner ruling 2026-08-31: the Windows Store is a target for BOTH products, overruling this fork's earlier 'stores = Apple + Play only' scope. THE EXTENSION IS .appx, NOT .msix: electron-builder 25.1.8 has one Windows Store target, `appx` (app-builder-lib AppxTarget.js:46,57), and the Store accepts it. A declared .msix would be a name nothing can produce. Unsigned-class until a Partner Center identity exists, so it lands as an artifact per run first." },
-    { "name": "Howland-Desktop-Windows-arm64.appx", "platform": "windows", "arch": "arm64", "channel": "store",
-      "why": "see the x64 .appx. Declared per-arch from the start because a name whose shape depends on how many builds exist that day renames itself the moment the second one lands." }
-  ]
+  "planned": []
 }

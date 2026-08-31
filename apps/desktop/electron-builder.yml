@@ -118,7 +118,13 @@ win:
         - versions.json-aarch64-pc-windows-msvc.exe
         - versions.json-x86_64-pc-windows-msvc.exe
   target:
+    # appx is the Windows Store target. electron-builder 25.1.8 has exactly one
+    # (app-builder-lib/out/targets/AppxTarget.js:46 `super("appx")`); there is no msix target and
+    # the Store accepts .appx. It builds without identityName/publisher/applicationId — those are
+    # needed to SUBMIT, not to produce the package — so the artifact exists before a Partner
+    # Center identity does, which is the deliverable.
     - nsis
+    - appx
 nsis:
   include: build/installer.nsh
 artifactName: openwork-${os}-${arch}-${version}.${ext}

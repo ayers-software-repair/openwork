@@ -21,7 +21,15 @@ Hard rules:
 - Load-bearing workflows: `release.yml` (desktop+Android; preflight-gated, `heads_*`
   selective, publish-what-signs with skip records and reconciliation; chains into howland's
   server release on success), `ios-submission.yml` (store head, dispatch only, hard-fails
-  unsigned; its .ipa is a CI artifact, never a release asset). No `schedule:` triggers, ever.
+  unsigned; its .ipa is a CI artifact, never a release asset), `contract.yml` (push/PR only;
+  runs the release contract and nothing else — no publish path, `contents: read`). No
+  `schedule:` triggers, ever.
+- **`packaging/platforms.json` declares what this fork builds**, on three channels (release
+  page / Actions artifact / store), and `packaging/platforms.test.mjs` holds both workflows to
+  it in both directions — `node --test packaging/platforms.test.mjs`, no pnpm install. Any
+  asset rename or new leg lands in the same change as its row, and reddens
+  `../howland/installer/release_assets_test.go`'s 26-asset count, which is the only cross-repo
+  tripwire there is.
 - Nothing publishes, tags, or dispatches without explicit owner go-ahead. Version locked at
   1.0.0, overwritten in place. No emojis; no AI attribution in commits; commit identity per
   the workspace CLAUDE.md.

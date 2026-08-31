@@ -9,9 +9,11 @@ placing it under `apps/` would pull Capacitor into the workspace lockfile and br
 
 ## Status (honest)
 
-This is a **correct scaffold, not a verified end-to-end build.** It has never been run in
-CI, and it needs a real macOS/Xcode and Android SDK build environment plus signing keys to
-produce installable apps. The native `android/` and `ios/` projects are **generated on the
+**The Android path is build-verified**: on 2026-08-31 the full chain (web bundle ->
+`cap add android` -> `cap sync` -> `gradle assembleDebug`) produced a debug-signed APK
+locally, first try after one environment fix (a JDK with a compiler). Runtime behavior on
+a real device is still unvalidated, and iOS still needs a real macOS/Xcode environment
+plus signing keys to produce anything installable. The native `android/` and `ios/` projects are **generated on the
 runner** (they are not committed) by `npx cap add`. Runtime behavior (Electron-only APIs in
 the web app, connecting to a Howland server) has not been validated on a device.
 

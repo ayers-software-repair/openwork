@@ -67,7 +67,7 @@
       "why": "see latest-mac.yml." },
 
     { "name": "Howland-Client-Android.apk",           "platform": "android", "arch": "any",   "channel": "release",  "published": false,
-      "why": "no ANDROID_KEYSTORE_BASE64 / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD / ANDROID_STORE_PASSWORD. Sideload is a real channel for an offline-first product, so this publishes the day the keystore lands." },
+      "why": "no ANDROID_KEYSTORE_BASE64 / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD / ANDROID_STORE_PASSWORD. Sideload is a real channel for an offline-first product, so this publishes the day the keystore lands. THIS ONE FILE IS ALSO THE AMAZON APPSTORE ARTIFACT -- Amazon accepts a standard APK, so a second Amazon-named asset would declare a different name for identical bytes. magpie states the same thing at release.yml:273, 'AAB (Play) + APK (Amazon + sideload)', and the uniformity law is the reason to say it the same way rather than invent a flavour here." },
     { "name": "Howland-Client-Android.aab",           "platform": "android", "arch": "any",   "channel": "release",  "published": false,
       "why": "the Play store-submission artifact; gated by the same keystore as the .apk." },
     { "name": "Howland-Client-CHECKSUMS.txt",         "platform": "any",     "arch": "any",   "channel": "release",  "published": false,
@@ -80,11 +80,9 @@
       "why": "NEVER a release asset, by policy, not for want of a certificate. App Store Connect is its channel; an .ipa on a public download page installs for nobody and is exposure with no upside. It is a 90-day Actions artifact behind authentication, which is the private hand-off the upload needs." }
   ],
   "planned": [
-    { "name": "Howland-Desktop-Windows-x64.msix", "platform": "windows", "arch": "x64", "channel": "store",
-      "why": "no leg exists. Owner ruling 2026-08-31: the Windows Store is a target for BOTH products, overruling this fork's earlier 'stores = Apple + Play only' scope. Unsigned-class until a Partner Center certificate exists, so it lands as an artifact per run first." },
-    { "name": "Howland-Desktop-Windows-arm64.msix", "platform": "windows", "arch": "arm64", "channel": "store",
-      "why": "see the x64 MSIX. Declared per-arch from the start because a name whose shape depends on how many builds exist that day renames itself the moment the second one lands." },
-    { "name": "Howland-Client-Android.apk (Amazon Appstore build)", "platform": "android", "arch": "any", "channel": "store",
-      "why": "no leg exists. The owner uploads store packages himself from the run; the Amazon build is a separate artifact from the Play .aab and has not been carded yet." }
+    { "name": "Howland-Desktop-Windows-x64.appx", "platform": "windows", "arch": "x64", "channel": "store",
+      "why": "no leg exists. Owner ruling 2026-08-31: the Windows Store is a target for BOTH products, overruling this fork's earlier 'stores = Apple + Play only' scope. THE EXTENSION IS .appx, NOT .msix: electron-builder 25.1.8 has one Windows Store target, `appx` (app-builder-lib AppxTarget.js:46,57), and the Store accepts it. A declared .msix would be a name nothing can produce. Unsigned-class until a Partner Center identity exists, so it lands as an artifact per run first." },
+    { "name": "Howland-Desktop-Windows-arm64.appx", "platform": "windows", "arch": "arm64", "channel": "store",
+      "why": "see the x64 .appx. Declared per-arch from the start because a name whose shape depends on how many builds exist that day renames itself the moment the second one lands." }
   ]
 }

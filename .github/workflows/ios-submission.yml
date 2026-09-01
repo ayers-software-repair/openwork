@@ -35,6 +35,10 @@ on:
       tag:
         description: 'Version to stamp (e.g. howland-v1.0.0); the build number comes from the run'
         required: true
+      compile_proof:
+        description: 'Compile with signing DISABLED and produce nothing - build evidence without an enrollment (an installable .ipa still requires the signing secrets)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -63,7 +67,14 @@ jobs:
       # release workflow's skip-and-report rule is right there because a partial release is a real
       # outcome the owner asked for; here a run that quietly did nothing is just the silence
       # problem in a new place. Somebody pressed the button to submit to the store.
+      # COMPILE PROOF, NO ENROLLMENT (owner question 2026-09-01: why enroll to BUILD?).
+      # Apple's toolchain will not EXPORT an installable .ipa without a signing identity —
+      # there is no unsigned-ipa analogue of an unsigned exe — but it WILL compile with
+      # signing disabled. compile_proof is the build-evidence half of the build/publish law:
+      # it proves the head compiles and produces no artifact; the .ipa stays where Apple
+      # gates it. Every signing-dependent step below carries the inverse condition.
       - name: Require the iOS signing secrets
+        if: ${{ !inputs.compile_proof }}
         env:
           APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
           APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
@@ -186,6 +197,7 @@ jobs:
       # provisioning profile. The profile NAME is derived from the decoded profile itself, so no
       # separate APPLE_PROVISIONING_PROFILE_NAME secret is required.
       - name: Setup iOS signing
+        if: ${{ !inputs.compile_proof }}
         env:
           APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
           APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
@@ -224,7 +236,21 @@ jobs:
           echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
           echo "Using provisioning profile: $PROFILE_NAME"
 
+      - name: Compile proof (signing disabled)
+        if: ${{ inputs.compile_proof }}
+        working-directory: mobile/ios/App
+        run: |
+          set -euo pipefail
+          xcodebuild -workspace App.xcworkspace -scheme App -sdk iphoneos \
+            -configuration Release -destination 'generic/platform=iOS' build \
+            MARKETING_VERSION="$STAMP_VERSION" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tail -60
+          echo "iOS head COMPILES. No artifact produced - compile-proof mode." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build iOS archive (signed)
+        if: ${{ !inputs.compile_proof }}
         working-directory: mobile/ios/App
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -245,6 +271,7 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME"
 
       - name: Export IPA (signed)
+        if: ${{ !inputs.compile_proof }}
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -284,6 +311,7 @@ jobs:
             -exportPath "$RUNNER_TEMP/build"
 
       - name: Stage the iOS archive for App Store Connect
+        if: ${{ !inputs.compile_proof }}
         run: |
           set -euo pipefail
           # Exactly one, or fail. A glob that matches nothing and reports success is how a run
@@ -304,6 +332,7 @@ jobs:
           ls -la out
 
       - name: Upload the submission binary
+        if: ${{ !inputs.compile_proof }}
         uses: actions/upload-artifact@v7
         with:
           # The artifact carries the asset's own name, not a bundle called "ios" with unnamed
@@ -320,6 +349,7 @@ jobs:
       # binary is collected by hand from the run page. A run that says only "green" leaves the
       # person who pressed the button to go hunting for what it made.
       - name: Say what was produced and where to get it
+        if: ${{ !inputs.compile_proof }}
         run: |
           set -euo pipefail
           SIZE=$(du -h out/Howland-Client-iOS-arm64.ipa | cut -f1)

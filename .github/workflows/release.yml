@@ -55,10 +55,20 @@ on:
         description: 'Release tag to create/attach (e.g. howland-v1.0.0)'
         required: true
       # SELECTIVE BUILDS (owner order 2026-08-25: "test the Mac server first, then widen").
-      # One boolean per platform, DEFAULT TRUE, and a tag push carries no inputs at all — so
-      # every gate treats EMPTY as true. The naive `if: inputs.heads_macos` is false on a tag
-      # push and would silently ship nothing on the event that matters most (magpie's catch;
-      # both products use the same gate expression, names and defaults).
+      # One boolean per platform, DEFAULT TRUE, and a tag push carries no inputs at all, so the
+      # selection must read EMPTY as true.
+      #
+      # UNIFIED WITH MAGPIE AND HOWLAND (estate item 47, 2026-09-01 audit): same names, prefix,
+      # type and default as magpie's release.yml and howland's server-release.yml, AND the same
+      # gate SHAPE — the empty-reads-as-true resolution happens ONCE, in this workflow's
+      # existing `preflight` job (its `sel` step, below), and every downstream `if:` reads
+      # `needs.preflight.outputs.<platform> == 'true'` rather than re-deriving
+      # `github.event_name != 'workflow_dispatch' || inputs.heads_x` per site. Magpie does the
+      # identical resolution in a job it calls `version`; howland does it in its own
+      # `preflight` job (estate item 11) — the job name differs where it already differed, the
+      # outputs contract (macos/windows/linux/android, string "true"/"false") does not. openwork
+      # keeps its own platform list (android, no macos-intel/windows-arm64 split in the boolean
+      # gate — those live only in the desktop OS matrix computed below, from these outputs).
       heads_macos:
         description: 'Build the macOS desktop heads'
         type: boolean
@@ -100,16 +110,41 @@ jobs:
     if: github.repository == 'ayers-software-repair/openwork'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # THE HEADS-GATE ROUTING (estate item 47): added to this existing job rather than a new one
+    # (magpie calls its version job for this outputs.macos et al; howland has its own preflight
+    # extend outputs the same way). Every build job's gate and the release job's checksum,
+    # reconcile and chain steps read these instead of re-deriving the input.
     outputs:
       desktop_matrix: ${{ steps.select.outputs.matrix }}
+      macos: ${{ steps.sel.outputs.macos }}
+      windows: ${{ steps.sel.outputs.windows }}
+      linux: ${{ steps.sel.outputs.linux }}
+      android: ${{ steps.sel.outputs.android }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # SELECTION, computed once. The desktop matrix spans three platforms inside one job, so
-      # per-platform selection has to shape the MATRIX — a deselected macOS leg that merely
-      # exits early still spins up a 10x-billed runner to decide not to work. Empty inputs
-      # (a tag push) select everything.
+      # Resolved BEFORE every other check so the selection is in the log even when one of them
+      # fails. Same case/`!= "false"` shape as magpie's version job and howland's own preflight
+      # job (estate items 11 and 47): "not false" rather than "is true", so an absent input (a
+      # tag push sends none) can never mean "skip".
+      - id: sel
+        run: |
+          set -euo pipefail
+          for h in macos windows linux android; do
+            case "$h" in
+              macos)   v="${{ inputs.heads_macos }}" ;;
+              windows) v="${{ inputs.heads_windows }}" ;;
+              linux)   v="${{ inputs.heads_linux }}" ;;
+              android) v="${{ inputs.heads_android }}" ;;
+            esac
+            if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "$v" != "false" ]; then
+              echo "$h=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$h=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
       # THE DECLARATION GATES THE RUN. packaging/platforms.json states what this fork builds and
       # packaging/platforms.test.mjs holds this workflow to it in both directions. It also runs on
       # every push (contract.yml), which is where a break should be caught -- this call is here so
@@ -118,12 +153,17 @@ jobs:
       - name: The declaration agrees with the workflows
         run: node --test packaging/platforms.test.mjs
 
+      # SELECTION, computed once. The desktop matrix spans three platforms inside one job, so
+      # per-platform selection has to shape the MATRIX — a deselected macOS leg that merely
+      # exits early still spins up a 10x-billed runner to decide not to work. Reads the `sel`
+      # step's outputs above rather than re-deriving the input, so this matrix and every other
+      # gate in the workflow can never disagree about what "empty means true" means.
       - name: Select the desktop legs to build
         id: select
         env:
-          SEL_MACOS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_macos }}
-          SEL_WINDOWS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_windows }}
-          SEL_LINUX: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_linux }}
+          SEL_MACOS: ${{ steps.sel.outputs.macos }}
+          SEL_WINDOWS: ${{ steps.sel.outputs.windows }}
+          SEL_LINUX: ${{ steps.sel.outputs.linux }}
         run: |
           set -euo pipefail
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
@@ -252,11 +292,13 @@ jobs:
     # wrong clone is a live publish path. The guard also keeps a future upstream-merged copy
     # inert anywhere but here. The heads_ clause skips the whole job when no desktop platform
     # is selected — a dynamic matrix with an EMPTY include list is a workflow error, not a
-    # no-op, so the job has to not run at all.
+    # no-op, so the job has to not run at all. Resolved once in preflight's `sel` step — see
+    # the input-block comment above — rather than re-derived here.
     if: >-
       github.repository == 'ayers-software-repair/openwork' &&
-      (github.event_name != 'workflow_dispatch' ||
-       inputs.heads_macos || inputs.heads_windows || inputs.heads_linux)
+      (needs.preflight.outputs.macos == 'true' ||
+       needs.preflight.outputs.windows == 'true' ||
+       needs.preflight.outputs.linux == 'true')
     strategy:
       fail-fast: false
       # Computed by preflight from the heads_ inputs; a tag push selects all six legs. The
@@ -798,11 +840,12 @@ jobs:
 
   build-android:
     needs: preflight
-    # Empty inputs (a tag push) mean true — the naive `inputs.heads_android` alone is false
-    # there and would silently skip Android on every real release.
+    # Resolved once in preflight's `sel` step — see the input-block comment above. Empty
+    # inputs (a tag push) mean true there; the naive `inputs.heads_android` alone would be
+    # false on a tag push and silently skip Android on every real release.
     if: >-
       github.repository == 'ayers-software-repair/openwork' &&
-      (github.event_name != 'workflow_dispatch' || inputs.heads_android)
+      needs.preflight.outputs.android == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -1066,8 +1109,16 @@ jobs:
     # Every head, one publish. `always()` because a leg that could not sign still ends green and
     # a leg that FAILED must not silently take the publish with it — the reconciliation below is
     # what decides whether this run is a release or an error.
-    needs: [build-desktop, build-android]
-    if: ${{ always() && github.repository == 'ayers-software-repair/openwork' }}
+    #
+    # `needs.preflight.result == 'success'` is required in addition to `always()` (same guard as
+    # howland's release job, server-release.yml, estate items 11/47). Without it, a preflight
+    # that failed before running its `sel` step leaves the outputs below empty, EXPECTED narrows
+    # to nothing, and the reconcile step below reports a false "Reconciled: 0 of 0" instead of
+    # stopping the run. preflight is added to `needs` here (not just via build-desktop and
+    # build-android) because a job can only read another job's `outputs` when it is a DIRECT
+    # need — transitive needs do not expose them.
+    needs: [preflight, build-desktop, build-android]
+    if: ${{ always() && needs.preflight.result == 'success' && github.repository == 'ayers-software-repair/openwork' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # ONE RELEASE TRAIN guard. The original reason (a separate mobile workflow racing this one
@@ -1151,7 +1202,8 @@ jobs:
       # selected at all, so it regenerates safely on any run that includes Android.
       - name: Checksum what shipped
         env:
-          FULL_DESKTOP: ${{ github.event_name != 'workflow_dispatch' || (inputs.heads_macos && inputs.heads_windows && inputs.heads_linux) }}
+          # Resolved once in preflight's `sel` step — see the input-block comment above.
+          FULL_DESKTOP: ${{ needs.preflight.outputs.macos == 'true' && needs.preflight.outputs.windows == 'true' && needs.preflight.outputs.linux == 'true' }}
         run: |
           set -euo pipefail
           cd release
@@ -1222,10 +1274,11 @@ jobs:
       # the Android manifest whenever Android is selected.
       - name: Reconcile against the expected assets
         env:
-          SEL_MACOS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_macos }}
-          SEL_WINDOWS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_windows }}
-          SEL_LINUX: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_linux }}
-          SEL_ANDROID: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_android }}
+          # Resolved once in preflight's `sel` step — see the input-block comment above.
+          SEL_MACOS: ${{ needs.preflight.outputs.macos }}
+          SEL_WINDOWS: ${{ needs.preflight.outputs.windows }}
+          SEL_LINUX: ${{ needs.preflight.outputs.linux }}
+          SEL_ANDROID: ${{ needs.preflight.outputs.android }}
         run: |
           set -euo pipefail
           EXPECTED=""
@@ -1379,9 +1432,13 @@ jobs:
           # contents-only this fails LOUDLY here, after the desktop release published fine —
           # rerun the server workflow by hand and extend the PAT.
           GH_TOKEN: ${{ secrets.RELEASES_PAT }}
-          SEL_MACOS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_macos }}
-          SEL_WINDOWS: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_windows }}
-          SEL_LINUX: ${{ github.event_name != 'workflow_dispatch' || inputs.heads_linux }}
+          # Resolved once in preflight's `sel` step — see the input-block comment above.
+          # Forwarded to server-release.yml's own workflow_dispatch as literal strings
+          # ("true"/"false") via `-f`, exactly the shape its boolean inputs — and its own `sel`
+          # step (howland server-release.yml, estate item 11) — already expect.
+          SEL_MACOS: ${{ needs.preflight.outputs.macos }}
+          SEL_WINDOWS: ${{ needs.preflight.outputs.windows }}
+          SEL_LINUX: ${{ needs.preflight.outputs.linux }}
         run: |
           set -euo pipefail
           gh workflow run server-release.yml \

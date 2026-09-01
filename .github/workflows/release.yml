@@ -1325,11 +1325,28 @@ jobs:
           echo "Reconciled: $n of $total published, the rest accounted for."
 
 
+      # A selective run whose every built leg publishes on a NON-release channel (unsigned
+      # Windows exes -> Actions artifacts per the signed-only release-page ruling, appx ->
+      # store) legitimately stages ZERO files. The reconcile above has already accounted for
+      # each absence by name, but softprops treats an unmatched files pattern as fatal — run
+      # 33455945150, the appx cells' green rerun, died HERE and not in any build. Publishing
+      # nothing is a no-op, recorded loudly, never a failure.
+      - name: Anything for the release page?
+        id: staged
+        run: |
+          set -euo pipefail
+          n=$(find release -type f | wc -l)
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+          if [ "$n" -eq 0 ]; then
+            echo "Nothing staged for the release page: every built asset in this selection publishes on a non-release channel, and the reconcile step accounted for each absence. The release page is untouched." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # Publish to the PUBLIC howland-releases repo (the public download + issues home). PUBLIC so the site
       # links to /releases/latest/download/<StableName>, always current, zero redeploy. RELEASES_PAT = a
       # token with contents:write on ayers-software-repair/howland-releases, set as a secret on this fork.
       # Notes come from RELEASE_NOTES.md in this repo; edit that file per version to tune the release notes.
       - name: Publish to the public releases repo
+        if: ${{ steps.staged.outputs.count != '0' }}
         uses: softprops/action-gh-release@v3
         with:
           repository: ayers-software-repair/howland-releases

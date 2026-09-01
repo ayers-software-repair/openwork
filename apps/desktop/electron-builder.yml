@@ -120,11 +120,19 @@ win:
   target:
     # appx is the Windows Store target. electron-builder 25.1.8 has exactly one
     # (app-builder-lib/out/targets/AppxTarget.js:46 `super("appx")`); there is no msix target and
-    # the Store accepts .appx. It builds without identityName/publisher/applicationId — those are
-    # needed to SUBMIT, not to produce the package — so the artifact exists before a Partner
-    # Center identity does, which is the deliverable.
+    # the Store accepts .appx. It builds without a PARTNER CENTER identity — that is needed to
+    # SUBMIT, not to produce the package — so the artifact exists before a Partner Center
+    # identity does, which is the deliverable.
     - nsis
     - appx
+appx:
+  # electron-builder validates the identity's SHAPE at build time even though the real values
+  # only matter at submission: its default identityName derives from package.json `name`
+  # ("@openwork/desktop"), whose @ and / fail the alpha-numeric/period/dash rule — measured on
+  # this leg's first real build (run 33455182968, both Windows arches, same error). A VALID
+  # placeholder lets the package build; Partner Center assigns the real identity at submission
+  # and these values are replaced then.
+  identityName: Howland.Desktop
 nsis:
   include: build/installer.nsh
 artifactName: openwork-${os}-${arch}-${version}.${ext}

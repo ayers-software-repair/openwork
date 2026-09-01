@@ -211,7 +211,7 @@
       "arch": "x64",
       "channel": "store",
       "published": false,
-      "why": "Windows Store package. Built on the existing windows-latest leg and collected as an Actions artifact ONLY \u2014 never the release page, until a Partner Center identity exists. appx builds without identityName/publisher/applicationId: those are needed to SUBMIT, not to package."
+      "why": "Windows Store package. Built on the existing windows-latest leg and collected as an Actions artifact ONLY \u2014 never the release page, until a Partner Center identity exists. The Partner Center identity is needed to SUBMIT, not to package; electron-builder validates the identityName's SHAPE at build time, so a valid placeholder (Howland.Desktop) carries the build and is replaced at submission."
     },
     {
       "name": "Howland-Desktop-Windows-arm64.appx",
@@ -219,7 +219,7 @@
       "arch": "arm64",
       "channel": "store",
       "published": false,
-      "why": "Windows Store package. Built on the existing windows-latest leg and collected as an Actions artifact ONLY \u2014 never the release page, until a Partner Center identity exists. appx builds without identityName/publisher/applicationId: those are needed to SUBMIT, not to package."
+      "why": "Windows Store package. Built on the existing windows-latest leg and collected as an Actions artifact ONLY \u2014 never the release page, until a Partner Center identity exists. The Partner Center identity is needed to SUBMIT, not to package; electron-builder validates the identityName's SHAPE at build time, so a valid placeholder (Howland.Desktop) carries the build and is replaced at submission."
     }
   ],
   "planned": []

@@ -1,9 +1,9 @@
-## Howland 1.0.0
+## OpenWork
 
-Chat, artifacts, and code on your own hardware. Free and private.
+A free, open-source desktop app for macOS, Windows, and Linux for doing work with AI agents on your own files.
 
-**Howland Server** runs your models and your library. For Mac, Windows, and Linux.
+Bring your own keys for 50+ models, extend agents with skills, plugins, and MCP servers, and share a complete setup with a link.
 
-**Howland Desktop** is the app you work in. For Mac (Apple Silicon or Intel), Windows, and Linux.
+No public release has been cut yet; when one is, its notes replace this file.
 
-Report an issue: https://github.com/ayers-software-repair/howland-releases/issues
+Report an issue: https://github.com/ayers-software-repair/openwork/issues

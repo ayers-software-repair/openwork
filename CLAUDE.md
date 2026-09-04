@@ -37,3 +37,17 @@ Hard rules:
   `../howland/installer/release_assets_test.go` binds the train — update it in the same
   change as any asset rename here.
 - Upstream files are upstream's: a fix that belongs upstream goes upstream, not here.
+
+## Tooling — the global rules apply here (see ~/.claude/CLAUDE.md)
+
+Two laws from the root file bind every session in this repo. They are not repeated in full here on
+purpose: a long CLAUDE.md gets ignored in the middle, so this is a pointer, not a copy.
+
+1. **CONSULT THE DOCS, NEVER GUESS.** Any claim about a library, framework, SDK or platform gets
+   read from the real documentation first — `context7` for libraries, `microsoft-docs` for
+   .NET/Windows/Azure. Cite the source. Never from memory.
+2. **Reach for the tool before the generic one.** `serena` for "where is this symbol used" before
+   grep; the LSP for definitions and references; `playwright` for a real browser (this box needs
+   `--no-sandbox` and `--mute-audio`).
+
+This repo is **TypeScript/Electron** — `typescript-language-server` applies.

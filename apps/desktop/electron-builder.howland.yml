@@ -1,0 +1,46 @@
+# Copyright Ayers Electronics Inc. All rights reserved.
+#
+# Howland's build-time additions to upstream's electron-builder config, and the file the release
+# packages with. It EXTENDS upstream's electron-builder.yml instead of copying it, so upstream's own
+# file is never edited and anything upstream adds to it arrives here without a merge.
+#
+# One merge semantic decides the shape of this file: in electron-builder's config merge, ARRAYS
+# CONCATENATE rather than replace, while scalars and maps are overridden child-over-parent. That is
+# why `protocols` below ADDS the Howland scheme beside upstream's rather than displacing it, which is
+# what the desktop main process asks Electron to register and what links already in the wild need. A
+# previous version of this override REPLACED the block and shipped a build that answered howland://
+# and no longer answered openwork://; neither macOS nor Linux can repair that at runtime, because one
+# fixes its Info.plist at build time and the other writes the MimeType from this config.
+#
+# The same concatenation means an upstream `deb.fpm` list would merge with the mapping below rather
+# than collide with it.
+extends:
+  - "file:electron-builder.yml"
+
+protocols:
+  - name: Howland
+    schemes:
+      - howland
+
+# The copyright file at the path Debian actually reads. `linux.license` sets a control field dpkg
+# never looks at, while /usr/share/doc/<pkg>/copyright is what `dpkg -L` leads to and what a licence
+# audit greps. A raw fpm path mapping is the form FpmTarget already emits for the icon and the
+# .desktop file. afterPack and extraFiles cannot place it: appOutDir maps entirely to /opt, so both
+# land the file in /opt/Howland, where nothing looks for it.
+deb:
+  fpm:
+    - "howland-copyright=/usr/share/doc/howland/copyright"
+
+# The executable name, which on Linux also names the icon and the installed .desktop file.
+#
+# Unset, it does NOT fall back to productName the way the option's own description says. The Linux
+# packager falls back to the sanitized PACKAGE name lowercased, so a package called @openwork/desktop
+# produced `Exec=/opt/Howland/@openworkdesktop`, `Icon=@openworkdesktop` and an
+# @openworkdesktop.desktop file in a Howland-branded build: the install directory came from
+# productName while the binary beside it kept upstream's package name.
+#
+# Declared under `linux` rather than at the root on purpose. At the root it also renames the macOS
+# and Windows binaries, and those names reach published asset filenames that are pinned by a test in
+# the consuming product. This surface is the one with the defect, so this is the scope of the fix.
+linux:
+  executableName: howland

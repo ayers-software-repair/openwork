@@ -46,8 +46,10 @@ purpose: a long CLAUDE.md gets ignored in the middle, so this is a pointer, not 
 1. **CONSULT THE DOCS, NEVER GUESS.** Any claim about a library, framework, SDK or platform gets
    read from the real documentation first — `context7` for libraries, `microsoft-docs` for
    .NET/Windows/Azure. Cite the source. Never from memory.
-2. **Reach for the tool before the generic one.** `serena` for "where is this symbol used" before
-   grep; the LSP for definitions and references; `playwright` for a real browser (this box needs
-   `--no-sandbox` and `--mute-audio`).
+2. **Reach for the tool before the generic one.** Symbols: the LSP for TypeScript, JavaScript,
+   Python, Go and C/C++, in a seat; grep + Read for C# (no C# server is installed: csharp-lsp died
+   on every call and serena was removed, both 2026-09-10). A real browser is the cached chromium
+   from Bash: `~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome --headless=new
+   --no-sandbox --mute-audio`; the playwright plugin is removed.
 
 This repo is **TypeScript/Electron** — `typescript-language-server` applies.

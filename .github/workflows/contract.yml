@@ -10,7 +10,7 @@ name: Release contract
 #   - it is guarded on github.repository like the other two, so a fork of this fork runs nothing;
 #   - there is NO `schedule:` trigger, ever (fork law).
 #
-# What it does: run the release contract on every push and pull request, so a change that breaks
+# What it does: run the release contract on every push and human pull request, so a change that breaks
 # the agreement between packaging/platforms.json and the two workflows is caught by the change
 # that broke it. The same check runs inside release.yml's preflight, so a dispatch cannot route
 # around it -- ONE SCRIPT, TWO CALLERS, never a copy in each.
@@ -34,7 +34,9 @@ concurrency:
 
 jobs:
   contract:
-    if: github.repository == 'ayers-software-repair/openwork'
+    if: >-
+      github.repository == 'ayers-software-repair/openwork'
+      && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

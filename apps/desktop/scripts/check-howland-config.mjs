@@ -1,4 +1,4 @@
-// Copyright Ayers Electronics Inc. All rights reserved.
+// Copyright Ayers Electronics Inc.
 //
 // Does the config the release actually packages with register BOTH url schemes?
 //

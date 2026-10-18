@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright Ayers Electronics Inc. All rights reserved.
+# Copyright Ayers Electronics Inc.
 #
 # EVERY -c.<path> OVERRIDE IN release.yml IS A REAL electron-builder OPTION, CHECKED AGAINST THE
 # INSTALLED SCHEMA RATHER THAN AGAINST MEMORY.

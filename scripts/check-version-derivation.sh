@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright Ayers Electronics Inc. All rights reserved.
+# Copyright Ayers Electronics Inc.
 #
 # THE VERSION DERIVATION IS COPIED FOUR TIMES AND NOTHING KEPT THE COPIES HONEST.
 #

@@ -12,9 +12,10 @@ Hard rules:
 - **pnpm only**, never npm/yarn (`mobile/` is the one standalone npm project, by design).
 - **MIT surface only**: never touch or redistribute `/ee` (FSL). Branding is BUILD-TIME
   overrides (electron-builder `-c` flags, env, icon swap) — **never rename upstream
-  internals**, or the fork stops taking upstream merges. Fork-owned surfaces:
-  `apps/desktop/electron/main.mjs`, `updater.mjs`, `prepare-sidecar.mjs`, the workflows,
-  `constants.json`, `WORKING.md`, this file.
+  internals**, or the fork stops taking upstream merges. The fork follows upstream by rebasing
+  its own commits onto upstream's current release and keeping the branding on top (D1598). The
+  only source files it may edit are listed once, in the workspace `../CLAUDE.md` (D1597,
+  D1604); this file carries no list of its own.
 - `constants.json` pins the opencode sidecar by `opencodeVersion` AND `opencodeCommit`;
   they change together when the sidecar is re-cut, and `release.yml`'s preflight enforces
   agreement with the fork release's SOURCE-COMMIT.txt.

@@ -94,6 +94,13 @@ if (cfg.mac?.extendInfo?.NSMicrophoneUsageDescription !== "Howland uses the micr
   process.exit(1);
 }
 
+// The AppImage must use the static runtime, which runs without FUSE2. Upstream's base config sets
+// it; AppImageTarget falls back to the legacy FUSE2 runtime when it is unset or "0.0.0".
+if (cfg.toolsets?.appimage !== "1.0.3") {
+  console.error(`toolsets.appimage is ${JSON.stringify(cfg.toolsets?.appimage)}, so the AppImage needs FUSE2 to start.`);
+  process.exit(1);
+}
+
 // The licence notices must ship on every target. electron-builder only warns when an extraResources
 // source is missing and builds without it, so each source is checked here as well.
 const LICENCES = ["licenses/NOTICE.txt", "licenses/LICENSE.openwork.txt", "licenses/LICENSE.opencode.txt"];
@@ -109,4 +116,4 @@ for (const to of LICENCES) {
   }
 }
 
-console.log("both schemes present; parent config still merging; native rebuild on; publish, homepage and appx set; licence notices packed.");
+console.log("both schemes present; parent config still merging; native rebuild on; publish, homepage and appx set; static AppImage runtime; licence notices packed.");

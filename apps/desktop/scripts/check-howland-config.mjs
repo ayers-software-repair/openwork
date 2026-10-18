@@ -16,7 +16,7 @@
 // Run from apps/desktop. Exits non-zero with the reason on any failure, so a workflow can gate on it
 // without reading the output.
 
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 
@@ -119,6 +119,11 @@ for (const [list, to] of LICENCES) {
   if (entry == null) {
     console.error(`no ${list} entry ships ${to}.`);
     process.exit(1);
+  }
+  // The dist exists only once Electron's install script has run; release.yml ensures it on macOS.
+  if (entry.from.startsWith("node_modules/electron/dist/") && !existsSync("node_modules/electron/dist")) {
+    console.log(`note: ${entry.from} not checked, Electron's install script has not run in this checkout.`);
+    continue;
   }
   if (!statSync(resolve(entry.from), { throwIfNoEntry: false })?.isFile()) {
     console.error(`${to} comes from ${entry.from}, which is not a file.`);

@@ -44,3 +44,14 @@ deb:
 # the consuming product. This surface is the one with the defect, so this is the scope of the fix.
 linux:
   executableName: howland
+
+# The licence notices, packed into resources/licenses on every target (deb, AppImage, dmg, nsis,
+# appx). Root-level, so they concatenate with upstream's root list and sit beside each platform's
+# own entries. The same files make up /usr/share/doc/howland/copyright in the release workflow.
+extraResources:
+  - from: resources/licenses/NOTICE.txt
+    to: licenses/NOTICE.txt
+  - from: ../../LICENSE
+    to: licenses/LICENSE.openwork.txt
+  - from: resources/licenses/LICENSE.opencode.txt
+    to: licenses/LICENSE.opencode.txt

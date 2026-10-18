@@ -569,8 +569,8 @@ jobs:
           # merged result, which is the only thing that answers "does the packaged build register
           # both schemes": the override names one and gains the other by list concatenation during
           # the merge, so reading the file on disk cannot tell you. The gate loads the config
-          # through electron-builder's own loader and fails if either scheme is missing or if the
-          # parent has stopped reaching the child.
+          # through electron-builder's own loader and fails if either scheme is missing, if the
+          # parent has stopped reaching the child, or if a licence notice is not packed.
           test -f electron-builder.howland.yml
           node scripts/check-howland-config.mjs
           cd ../..

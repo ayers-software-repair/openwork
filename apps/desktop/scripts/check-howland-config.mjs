@@ -16,7 +16,9 @@
 // Run from apps/desktop. Exits non-zero with the reason on any failure, so a workflow can gate on it
 // without reading the output.
 
+import { statSync } from "node:fs";
 import { createRequire } from "node:module";
+import { resolve } from "node:path";
 
 // app-builder-lib holds the config loader but is a TRANSITIVE dependency, and pnpm does not hoist
 // those, so importing it by bare name fails here. Resolving it through electron-builder - a declared
@@ -57,4 +59,19 @@ for (const [key, value] of Object.entries({ appId: cfg.appId, afterPack: cfg.aft
   }
 }
 
-console.log("both schemes present; parent config still merging.");
+// The licence notices must ship on every target. electron-builder only warns when an extraResources
+// source is missing and builds without it, so each source is checked here as well.
+const LICENCES = ["licenses/NOTICE.txt", "licenses/LICENSE.openwork.txt", "licenses/LICENSE.opencode.txt"];
+for (const to of LICENCES) {
+  const entry = (cfg.extraResources ?? []).find((e) => typeof e === "object" && e.to === to);
+  if (entry == null) {
+    console.error(`no root extraResources entry ships ${to}.`);
+    process.exit(1);
+  }
+  if (!statSync(resolve(entry.from), { throwIfNoEntry: false })?.isFile()) {
+    console.error(`${to} comes from ${entry.from}, which is not a file.`);
+    process.exit(1);
+  }
+}
+
+console.log("both schemes present; parent config still merging; licence notices packed.");

@@ -61,6 +61,15 @@ appx:
 mac:
   extendInfo:
     NSMicrophoneUsageDescription: Howland uses the microphone when you ask a question by voice.
+  # electron-builder deletes Electron's LICENSE and LICENSES.chromium.html from the macOS bundle
+  # (app-builder-lib out/electron/electronMac.js), so they are packed beside the other notices.
+  # Linux and Windows keep both at the install root. The Chromium file exists only in the dist that
+  # electron's install script unpacks during `pnpm install` (allowed in pnpm-workspace.yaml).
+  extraResources:
+    - from: node_modules/electron/LICENSE
+      to: licenses/LICENSE.electron.txt
+    - from: node_modules/electron/dist/LICENSES.chromium.html
+      to: licenses/LICENSES.chromium.html
 
 # The executable name, which on Linux also names the icon and the installed .desktop file.
 #

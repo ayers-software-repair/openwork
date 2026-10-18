@@ -103,11 +103,21 @@ if (cfg.toolsets?.appimage !== "1.0.3") {
 
 // The licence notices must ship on every target. electron-builder only warns when an extraResources
 // source is missing and builds without it, so each source is checked here as well.
-const LICENCES = ["licenses/NOTICE.txt", "licenses/LICENSE.openwork.txt", "licenses/LICENSE.opencode.txt"];
-for (const to of LICENCES) {
-  const entry = (cfg.extraResources ?? []).find((e) => typeof e === "object" && e.to === to);
+// On macOS electron-builder deletes Electron's and Chromium's licence files from the bundle
+// (app-builder-lib out/electron/electronMac.js), so the mac target packs them here instead. Their
+// sources come from the electron package and the dist its install script unpacks.
+const LICENCES = [
+  ["extraResources", "licenses/NOTICE.txt"],
+  ["extraResources", "licenses/LICENSE.openwork.txt"],
+  ["extraResources", "licenses/LICENSE.opencode.txt"],
+  ["mac.extraResources", "licenses/LICENSE.electron.txt"],
+  ["mac.extraResources", "licenses/LICENSES.chromium.html"],
+];
+for (const [list, to] of LICENCES) {
+  const entries = list === "extraResources" ? cfg.extraResources : cfg.mac?.extraResources;
+  const entry = (entries ?? []).find((e) => typeof e === "object" && e.to === to);
   if (entry == null) {
-    console.error(`no root extraResources entry ships ${to}.`);
+    console.error(`no ${list} entry ships ${to}.`);
     process.exit(1);
   }
   if (!statSync(resolve(entry.from), { throwIfNoEntry: false })?.isFile()) {

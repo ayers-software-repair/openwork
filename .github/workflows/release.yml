@@ -487,8 +487,9 @@ jobs:
           echo "macOS notarization enabled (notarytool API key)."
 
       # electron-builder only warns on a missing extraResources source, so the Chromium licence the
-      # mac bundle packs is made certain here: a store restored from cache can skip Electron's
-      # install script, which is what unpacks node_modules/electron/dist.
+      # mac bundle packs is made certain here. The electron package (43.7.7) has no lifecycle
+      # scripts, so neither install nor `pnpm rebuild electron` unpacks node_modules/electron/dist;
+      # its install.js, exposed as the install-electron bin, is what does.
       - name: Electron's dist is unpacked for the macOS licences
         if: ${{ runner.os == 'macOS' }}
         shell: bash
@@ -497,9 +498,9 @@ jobs:
           set -euo pipefail
           FILE=node_modules/electron/dist/LICENSES.chromium.html
           if [ ! -f "$FILE" ]; then
-            pnpm rebuild electron
+            pnpm exec install-electron
           fi
-          test -f "$FILE" || { echo "::error::apps/desktop/$FILE is missing after pnpm rebuild electron"; exit 1; }
+          test -f "$FILE" || { echo "::error::apps/desktop/$FILE is missing after install-electron"; exit 1; }
 
       # Main package step. On Ubuntu this builds AppImage + deb, named on the command line below:
       # upstream's linux.target also lists tar.gz, and a config override can only add to a list.

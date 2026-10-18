@@ -651,7 +651,7 @@ jobs:
       # artifact names, while the release serves STABLE names — same bytes, renamed, so the
       # recorded sha512/size stay valid and only the names need rewriting. Each leg then
       # renames its metadata to the per-platform+arch channel file the app requests
-      # (howlandUpdaterChannel in electron/updater.mjs — the two lists must match).
+      # (howlandManifestChannel in electron/main.mjs — the two lists must match).
       - name: Stable-name the updater metadata
         shell: bash
         run: |

@@ -88,6 +88,13 @@ import {
 } from "./process-resilience.mjs";
 import { createQuitSequencer } from "./quit-sequence.mjs";
 
+// The size the window wants, and the floor below which it stops being usable. Clamped to the
+// display's work area at construction.
+const PREFERRED_WINDOW_WIDTH = 1180;
+const PREFERRED_WINDOW_HEIGHT = 820;
+const MIN_WINDOW_WIDTH = 800;
+const MIN_WINDOW_HEIGHT = 600;
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, "../../..");
 const require = createRequire(import.meta.url);
@@ -107,6 +114,7 @@ const {
   net: electronNet,
   powerMonitor,
   Notification: ElectronNotification,
+  screen,
   session,
   shell,
 } = require("electron");
@@ -119,12 +127,19 @@ const DESKTOP_DISTRIBUTION = resolveDesktopDistribution({
   packageFlavor: Reflect.get(desktopPackageMetadata, "openworkDistribution"),
   environmentFlavor: process.env.OPENWORK_DESKTOP_DISTRIBUTION,
 });
-const TAURI_APP_IDENTIFIER = DESKTOP_DISTRIBUTION.appIdentifier;
+// Howland's identity. OPENWORK_ELECTRON_APP_NAME is ignored in packaged builds and
+// OPENWORK_ELECTRON_APP_IDENTIFIER is a runtime variable, so neither can brand a shipped app.
+// The identifier must match the release's -c.appId: NSIS stamps shortcuts with it and
+// Squirrel.Mac derives its ShipIt domain from it.
+const HOWLAND_APP_NAME = "Howland";
+const HOWLAND_APP_IDENTIFIER = "com.howland.app";
+// Registered beside openwork:// and normalized to it before the renderer sees a link.
+const HOWLAND_PROTOCOL_SCHEME = "howland";
 const DEV_APP_IDENTIFIER = `${DESKTOP_DISTRIBUTION.appIdentifier}.dev`;
 const DESKTOP_PROTOCOL_SCHEME = DESKTOP_DISTRIBUTION.protocolScheme;
 const DEFAULT_APP_NAME =
   (!app.isPackaged ? process.env.OPENWORK_ELECTRON_APP_NAME?.trim() : "") ||
-  (isDevMode ? `${DESKTOP_DISTRIBUTION.appName} - Dev` : DESKTOP_DISTRIBUTION.appName);
+  (isDevMode ? `${HOWLAND_APP_NAME} - Dev` : HOWLAND_APP_NAME);
 const BLANK_SLATE_LAUNCH = resolveBlankSlateLaunch({
   appName: DEFAULT_APP_NAME,
   profile: processBlankSlateProfile,
@@ -138,7 +153,7 @@ await initOpenworkSentry({
   distribution: DESKTOP_DISTRIBUTION,
   packageMetadata: desktopPackageMetadata,
 });
-const BASE_APP_IDENTIFIER = isDevMode ? DEV_APP_IDENTIFIER : TAURI_APP_IDENTIFIER;
+const BASE_APP_IDENTIFIER = isDevMode ? DEV_APP_IDENTIFIER : HOWLAND_APP_IDENTIFIER;
 const APP_IDENTIFIER = resolveAppIdentifier({
   appIdentifierOverride: process.env.OPENWORK_ELECTRON_APP_IDENTIFIER,
   appRootPath: APP_ROOT,
@@ -156,12 +171,15 @@ if (BLANK_SLATE_LAUNCH.enabled || process.env.OPENWORK_ELECTRON_USE_MOCK_KEYCHAI
   // system keychain normally.
   app.commandLine.appendSwitch("use-mock-keychain");
 }
-const RELEASE_DOWNLOAD_BASE_URL = "https://github.com/different-ai/openwork/releases/latest/download";
-const RELEASE_PAGE_URL = "https://github.com/different-ai/openwork/releases/latest";
-const DOCS_PAGE_URL = "https://openworklabs.com/docs";
+const RELEASE_DOWNLOAD_BASE_URL = "https://github.com/ayers-software-repair/howland-releases/releases/latest/download";
+const RELEASE_PAGE_URL = "https://github.com/ayers-software-repair/howland-releases/releases/latest";
+const DOCS_PAGE_URL = "https://github.com/ayers-software-repair/howland-releases#readme";
+const REPORT_ISSUE_URL = "https://github.com/ayers-software-repair/howland-releases/issues/new";
 const applicationMenu = createApplicationMenu({
   appName: APP_NAME,
   docsUrl: DOCS_PAGE_URL,
+  reportIssueUrl: REPORT_ISSUE_URL,
+  howlandUrls: () => resolveHowlandUrls(),
   getWindow: () => createMainWindow(),
   closeBrowserTab: (host) => browserPanel?.closeFocusedBrowserTab(host) ?? false,
 });
@@ -236,6 +254,7 @@ if (
   && !(process.platform === "linux" && process.env.APPIMAGE)
 ) {
   app.setAsDefaultProtocolClient(DESKTOP_PROTOCOL_SCHEME);
+  app.setAsDefaultProtocolClient(HOWLAND_PROTOCOL_SCHEME);
 }
 const userDataPath = BLANK_SLATE_LAUNCH.userDataPath ?? resolveUserDataPath({
   appDataPath: app.getPath("appData"),
@@ -305,27 +324,23 @@ function resolveSystemArch() {
   return normalizeRuntimeArch(os.arch());
 }
 
-function platformDownloadSlug() {
-  if (process.platform === "darwin") return "mac";
-  if (process.platform === "win32") return "win";
-  return "linux";
+// Howland releases carry stable, version-free installer names, so the other architecture's
+// installer is a fixed URL rather than an entry in an updater manifest.
+function howlandAssetName(arch) {
+  const a = arch === "arm64" ? "arm64" : "x64";
+  if (process.platform === "darwin") return `Howland-Desktop-macOS-${a}.dmg`;
+  if (process.platform === "win32") return `Howland-Desktop-Windows-${a}.exe`;
+  return `Howland-Desktop-Linux-${a}.AppImage`;
 }
 
-function downloadAssetArch(arch) {
-  if (process.platform === "linux" && arch === "x64") return "x86_64";
-  return arch;
-}
-
-function downloadAssetExtension() {
-  if (process.platform === "darwin") return "dmg";
-  if (process.platform === "win32") return "exe";
-  return "AppImage";
-}
-
-function updaterManifestName(arch) {
-  if (process.platform === "darwin") return "latest-mac.yml";
-  if (process.platform === "win32") return "latest.yml";
-  return arch === "arm64" ? "latest-linux-arm64.yml" : "latest-linux.yml";
+// The release publishes one updater file per platform and architecture. electron-updater adds
+// "-mac" or "-linux[-arch]" to the channel itself (Provider.getCustomChannelName), so only the
+// two legs whose file differs from its default need a channel: Windows arm64 reads
+// latest-arm64.yml and Intel macOS reads latest-x64-mac.yml.
+function howlandManifestChannel() {
+  if (process.platform === "win32" && process.arch === "arm64") return "latest-arm64";
+  if (process.platform === "darwin" && process.arch !== "arm64") return "latest-x64";
+  return "latest";
 }
 
 function archLabel(arch) {
@@ -334,52 +349,14 @@ function archLabel(arch) {
   return arch;
 }
 
-function parseUpdaterManifestFiles(raw) {
-  const files = [];
-  let current = null;
-  for (const line of String(raw || "").split(/\r?\n/)) {
-    const start = line.match(/^\s*-\s+url:\s*(.+?)\s*$/);
-    if (start) {
-      current = { url: start[1].trim().replace(/^['"]|['"]$/g, "") };
-      files.push(current);
-      continue;
-    }
-    const prop = line.match(/^\s{4}([A-Za-z][A-Za-z0-9_-]*):\s*(.+?)\s*$/);
-    if (prop && current) {
-      current[prop[1]] = prop[2].trim().replace(/^['"]|['"]$/g, "");
-    }
-  }
-  return files.filter((file) => file.url);
-}
-
-function selectDownloadFile(files, arch) {
-  const assetArch = downloadAssetArch(arch);
-  const expected = `-${assetArch}-`;
-  const extension = downloadAssetExtension();
-  const matchingArch = files.filter((file) => file.url.includes(expected));
-  return (
-    matchingArch.find((file) => file.url.endsWith(`.${extension}`)) ||
-    matchingArch.find((file) => file.url.endsWith(".zip")) ||
-    matchingArch[0] ||
-    null
-  );
-}
-
 async function resolveCorrectArchitectureDownloadUrl(arch) {
-  const manifestUrl = `${RELEASE_DOWNLOAD_BASE_URL}/${updaterManifestName(arch)}`;
+  // Confirm the asset exists so the banner never offers a dead link.
+  const url = `${RELEASE_DOWNLOAD_BASE_URL}/${howlandAssetName(arch)}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const response = await electronNet.fetch(manifestUrl, {
-      signal: controller.signal,
-      headers: { Accept: "text/yaml, text/plain, */*" },
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const selected = selectDownloadFile(parseUpdaterManifestFiles(await response.text()), arch);
-    if (!selected?.url) return null;
-    return /^https?:\/\//i.test(selected.url)
-      ? selected.url
-      : new URL(selected.url, `${RELEASE_DOWNLOAD_BASE_URL}/`).toString();
+    const response = await electronNet.fetch(url, { method: "HEAD", signal: controller.signal });
+    return response.ok ? url : null;
   } catch (error) {
     console.warn("[architecture] failed to resolve latest download URL", error);
     return null;
@@ -393,7 +370,6 @@ async function resolveArchitectureInfo() {
   const systemArch = resolveSystemArch();
   const version = app.getVersion();
   const targetArch = systemArch === "arm64" || systemArch === "x64" ? systemArch : appArch;
-  const assetName = `openwork-${platformDownloadSlug()}-${downloadAssetArch(targetArch)}-${version}.${downloadAssetExtension()}`;
   // The public release manifest only matters when the installed build does not
   // match the machine; a matching install never shows a download, so it must
   // not contact the release host (an unactivated enterprise install in
@@ -408,7 +384,8 @@ async function resolveArchitectureInfo() {
     mismatch: appArch !== systemArch && hasCorrectArchitectureDownload,
     platform: process.platform === "win32" ? "windows" : process.platform,
     version,
-    downloadUrl: latestDownloadUrl || `${RELEASE_DOWNLOAD_BASE_URL}/${assetName}`,
+    // null when the HEAD check failed; the banner is suppressed then and must not offer a dead link.
+    downloadUrl: latestDownloadUrl,
     releaseUrl: RELEASE_PAGE_URL,
   };
 }
@@ -1209,14 +1186,25 @@ function forwardedDeepLinks(argv) {
     .filter(
       (entry) =>
         entry.startsWith(`${DESKTOP_PROTOCOL_SCHEME}://`) ||
+        entry.startsWith(`${HOWLAND_PROTOCOL_SCHEME}://`) ||
         (!app.isPackaged && entry.startsWith("openwork-dev://")) ||
         entry.startsWith("https://") ||
         entry.startsWith("http://"),
     );
 }
 
+// The renderer parses openwork:// links, so howland:// is translated here and nothing
+// downstream changes.
+function normalizeDeepLink(url) {
+  const prefix = `${HOWLAND_PROTOCOL_SCHEME}://`;
+  if (typeof url === "string" && url.startsWith(prefix)) {
+    return `${DESKTOP_PROTOCOL_SCHEME}://${url.slice(prefix.length)}`;
+  }
+  return url;
+}
+
 function queueDeepLinks(urls) {
-  const nextUrls = urls.filter(Boolean);
+  const nextUrls = urls.filter(Boolean).map(normalizeDeepLink);
   if (nextUrls.length === 0) return;
   pendingDeepLinks.push(...nextUrls);
   if (mainWindow?.webContents) {
@@ -1232,6 +1220,53 @@ function flushPendingDeepLinks() {
 
 function globalOpencodeRoot() {
   return globalOpencodeConfigDir();
+}
+
+// The Howland server's address comes from the agent config the server wrote (/connect), so the
+// menu follows the server wherever it is: localhost, a LAN name or a tailnet name. The hub reports
+// which ports its services ended up on, since a port conflict can move one.
+const HOWLAND_DEFAULT_PORTS = { library: 31051, hub: 31052, search: 31053 };
+
+async function howlandServerHost() {
+  try {
+    const cfg = JSON.parse(await readFile(path.join(globalOpencodeRoot(), "opencode.json"), "utf8"));
+    for (const provider of Object.values(cfg?.provider ?? {})) {
+      const baseUrl = provider?.options?.baseURL;
+      if (typeof baseUrl === "string" && baseUrl) return new URL(baseUrl).hostname;
+    }
+  } catch {
+    // No config yet, or unreadable: use the local server.
+  }
+  return "127.0.0.1";
+}
+
+async function resolveHowlandUrls() {
+  const host = await howlandServerHost();
+  const hub = `http://${host}:${HOWLAND_DEFAULT_PORTS.hub}`;
+  const ports = { ...HOWLAND_DEFAULT_PORTS };
+  try {
+    const response = await electronNet.fetch(`${hub}/status`, { signal: AbortSignal.timeout(2000) });
+    if (response.ok) {
+      const status = await response.json();
+      for (const service of status?.services ?? []) {
+        const port = Number(/:(\d+)$/.exec(service?.url ?? "")?.[1]);
+        if (!port) continue;
+        if (service.name === "Library") ports.library = port;
+        if (service.name === "Search") ports.search = port;
+      }
+    }
+  } catch {
+    // The server may be off or slow; the defaults still point at the right place.
+  }
+  return {
+    hub,
+    library: `http://${host}:${ports.library}`,
+    search: `http://${host}:${ports.search}`,
+    navigator: `${hub}/maps`,
+    monitor: `${hub}/monitor`,
+    connect: `${hub}/connect`,
+    settings: `${hub}/settings`,
+  };
 }
 
 function execResult(ok, stdout = "", stderr = "", status = ok ? 0 : 1) {
@@ -2404,9 +2439,17 @@ async function createMainWindow() {
     app.dock.setIcon(windowIconImage);
   }
 
+  // Clamp to the work area so a small screen never opens the window partly off-screen.
+  // screen.* is only safe after app.whenReady(), hence here rather than at module scope.
+  const workArea = screen.getPrimaryDisplay().workAreaSize;
+  const initialWidth = Math.max(MIN_WINDOW_WIDTH, Math.min(PREFERRED_WINDOW_WIDTH, workArea.width));
+  const initialHeight = Math.max(MIN_WINDOW_HEIGHT, Math.min(PREFERRED_WINDOW_HEIGHT, workArea.height));
+
   mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 820,
+    width: initialWidth,
+    height: initialHeight,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     title: currentDisplayAppName,
     show: false,
     ...(process.platform === "win32" ? { skipTaskbar: true } : {}),
@@ -2630,12 +2673,9 @@ const { ensureAutoUpdater } = registerUpdaterIpc({
   app,
   ipcMain,
   getMainWindow: () => mainWindow,
-  // All distributions intentionally share one application identifier, so they also
-  // share Squirrel's ShipIt domain. Keep the shared default rather than
-  // implying an isolation the bundle identifier cannot provide.
-  manifestChannel: DESKTOP_DISTRIBUTION.flavor === "public"
-    ? "latest"
-    : DESKTOP_DISTRIBUTION.flavor,
+  // Squirrel.Mac derives the ShipIt domain from the bundle id, which is Howland's.
+  shipItDefaultsDomain: `${HOWLAND_APP_IDENTIFIER}.ShipIt`,
+  manifestChannel: howlandManifestChannel(),
   electronNet,
   shell,
   distribution: DESKTOP_DISTRIBUTION.flavor,

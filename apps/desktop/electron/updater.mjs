@@ -43,9 +43,12 @@ export function resolveAppVersion(app) {
   }
   return _cachedAppVersion;
 }
+// Howland's one release train. Every feed points here so the updater can never install stock
+// OpenWork over this build; there is no separate alpha release, so both channels share it.
+const HOWLAND_RELEASES_URL = "https://github.com/ayers-software-repair/howland-releases/releases";
 const ELECTRON_UPDATER_FEEDS = Object.freeze({
-  stable: "https://github.com/different-ai/openwork/releases/latest/download",
-  alpha: "https://github.com/different-ai/openwork/releases/download/alpha-macos-latest",
+  stable: `${HOWLAND_RELEASES_URL}/latest/download`,
+  alpha: `${HOWLAND_RELEASES_URL}/latest/download`,
 });
 
 function normalizeElectronUpdaterChannel(value, manifestChannel = "latest") {
@@ -176,7 +179,7 @@ export function targetedStableUpdaterFeed(currentVersion, targetVersion, allowOl
       ? "Recovery target version must differ from the installed version."
       : "Target update version must be newer than the installed version.");
   }
-  return `https://github.com/different-ai/openwork/releases/download/v${normalizedTarget}`;
+  return `${HOWLAND_RELEASES_URL}/download/howland-v${normalizedTarget}`;
 }
 
 function updaterChannelState(app, channel, targetVersion = null, manifestChannel = "latest") {

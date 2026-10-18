@@ -11,7 +11,7 @@ const NATIVE_MENU_TOGGLE_SIDEBAR_EVENT = "openwork:native-menu:toggle-sidebar";
 const NATIVE_MENU_CHECK_UPDATES_EVENT = "openwork:native-menu:check-updates";
 const NATIVE_MENU_ZOOM_EVENT = "openwork:native-menu:zoom";
 
-export function createApplicationMenu({ appName, docsUrl, getWindow, closeBrowserTab }) {
+export function createApplicationMenu({ appName, docsUrl, reportIssueUrl, howlandUrls, getWindow, closeBrowserTab }) {
   let applicationMenuVisible = process.platform === "darwin";
   let currentAppName = appName;
 
@@ -43,6 +43,13 @@ export function createApplicationMenu({ appName, docsUrl, getWindow, closeBrowse
   async function zoomFromNativeMenu(action) {
     const win = await getWindow();
     win.webContents.send(NATIVE_MENU_ZOOM_EVENT, action);
+  }
+
+  // The Howland menu opens each of the server's dashboards. The address is resolved per click
+  // (it reads the configured server and asks it which ports its services are on).
+  async function openHowland(part) {
+    const target = (await howlandUrls())?.[part];
+    if (target) await shell.openExternal(target);
   }
 
   function install() {
@@ -200,6 +207,25 @@ export function createApplicationMenu({ appName, docsUrl, getWindow, closeBrowse
               ]),
         ],
       },
+      // Rendered only when the embedder supplies a resolver, so builds without a server see no change.
+      ...(howlandUrls
+        ? [
+            {
+              label: "Howland",
+              submenu: [
+                { label: "Hub", click: () => runDetachedTask("open Howland hub", () => openHowland("hub")) },
+                { type: "separator" },
+                { label: "Library", click: () => runDetachedTask("open Howland library", () => openHowland("library")) },
+                { label: "Navigator", click: () => runDetachedTask("open Howland navigator", () => openHowland("navigator")) },
+                { label: "Search", click: () => runDetachedTask("open Howland search", () => openHowland("search")) },
+                { type: "separator" },
+                { label: "Monitor", click: () => runDetachedTask("open Howland monitor", () => openHowland("monitor")) },
+                { label: "Set Up Another Computer", click: () => runDetachedTask("open Howland connect", () => openHowland("connect")) },
+                { label: "Server Settings", click: () => runDetachedTask("open Howland settings", () => openHowland("settings")) },
+              ],
+            },
+          ]
+        : []),
       {
         role: "help",
         submenu: [
@@ -220,6 +246,17 @@ export function createApplicationMenu({ appName, docsUrl, getWindow, closeBrowse
               runDetachedTask("open documentation from menu", () => shell.openExternal(docsUrl));
             },
           },
+          // Rendered only when the embedder passes reportIssueUrl.
+          ...(reportIssueUrl
+            ? [
+                {
+                  label: "Report a Problem",
+                  click: () => {
+                    runDetachedTask("open issue tracker from menu", () => shell.openExternal(reportIssueUrl));
+                  },
+                },
+              ]
+            : []),
         ],
       },
     ]);

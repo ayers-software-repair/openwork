@@ -658,7 +658,7 @@ export default {
   "settings.runtime_desc": "Статус вашего локального движка и сервера OpenWork.",
   "settings.runtime_title": "Среда выполнения",
   "settings.sandbox_requires_desktop": "Для проверки песочницы требуется настольное приложение",
-  "settings.send_feedback": "Отправить отзыв",
+  "settings.send_feedback": "Сообщить о проблеме",
   "settings.show_model_reasoning": "Показывать рассуждения модели",
   "settings.show_model_reasoning_desc": "Разворачивайте traces рассуждений в UI, когда модель их показывает.",
   "settings.startup_remote_warning": "Предпочтение запуска сейчас удаленное. Настройки движка",

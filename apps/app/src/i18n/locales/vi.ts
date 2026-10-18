@@ -592,7 +592,7 @@ export default {
   "settings.runtime_desc": "Trạng thái engine nội bộ và máy chủ OpenWork.",
   "settings.runtime_title": "Runtime",
   "settings.sandbox_requires_desktop": "Kiểm tra sandbox yêu cầu ứng dụng desktop",
-  "settings.send_feedback": "Gửi phản hồi",
+  "settings.send_feedback": "Báo cáo sự cố",
   "settings.show_model_reasoning": "Hiển thị suy luận model",
   "settings.show_model_reasoning_desc": "Mở rộng dấu vết suy luận trong giao diện khi model cung cấp.",
   "settings.startup_remote_warning": "Tùy chọn khởi động hiện là từ xa. Cài đặt engine",

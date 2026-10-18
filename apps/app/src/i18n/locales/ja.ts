@@ -591,7 +591,7 @@ export default {
   "settings.runtime_desc": "ローカルエンジンとOpenWorkサーバーのステータス。",
   "settings.runtime_title": "ランタイム",
   "settings.sandbox_requires_desktop": "サンドボックスプローブにはデスクトップアプリが必要です",
-  "settings.send_feedback": "フィードバックを送信",
+  "settings.send_feedback": "問題を報告",
   "settings.show_model_reasoning": "モデルの推論を表示",
   "settings.show_model_reasoning_desc": "モデルが推論トレースを提供する場合、UIで展開表示します。",
   "settings.startup_remote_warning": "起動設定は現在リモートです。エンジン設定は",

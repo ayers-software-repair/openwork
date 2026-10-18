@@ -115,5 +115,31 @@ export function buildFeedbackUrl(options: FeedbackUrlOptions): string {
     }
   }
 
+  // GitHub's new-issue form reads only title and body, so the context above goes into the body as
+  // well. The body also asks for reports of model output: this is the in-app way to report
+  // offensive or inappropriate generated content.
+  const context = Object.entries(entries)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `- ${key}: ${value}`)
+    .join("\n");
+
+  url.searchParams.set(
+    "body",
+    [
+      "<!-- If you are reporting something the model generated, paste it below. -->",
+      "",
+      "### What happened",
+      "",
+      "",
+      "### What you expected",
+      "",
+      "",
+      "### Details",
+      "",
+      context || "- (none collected)",
+      `- entrypoint: ${options.entrypoint}`,
+    ].join("\n"),
+  );
+
   return url.toString();
 }

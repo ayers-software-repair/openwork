@@ -591,7 +591,7 @@ export default {
   "settings.runtime_desc": "Estat del motor local i del servidor OpenWork.",
   "settings.runtime_title": "Runtime",
   "settings.sandbox_requires_desktop": "La prova de Sandbox requereix l'app d'escriptori",
-  "settings.send_feedback": "Envia comentaris",
+  "settings.send_feedback": "Informa d'un problema",
   "settings.show_model_reasoning": "Mostra el raonament del model",
   "settings.show_model_reasoning_desc": "Desplega les traces de raonament a la UI quan el model les exposi.",
   "settings.startup_remote_warning": "Ara mateix la preferència d'inici és remota. La configuració del motor",

@@ -591,7 +591,7 @@ export default {
   "settings.runtime_desc": "Status do seu engine local e servidor OpenWork.",
   "settings.runtime_title": "Runtime",
   "settings.sandbox_requires_desktop": "Sonda do sandbox requer o app desktop",
-  "settings.send_feedback": "Enviar feedback",
+  "settings.send_feedback": "Relatar um problema",
   "settings.show_model_reasoning": "Mostrar raciocínio do modelo",
   "settings.show_model_reasoning_desc": "Expandir os traços de raciocínio na interface quando o modelo os expõe.",
   "settings.startup_remote_warning": "A preferência de inicialização é atualmente remota. Configurações do engine",

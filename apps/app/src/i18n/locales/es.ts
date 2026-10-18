@@ -591,7 +591,7 @@ export default {
   "settings.runtime_desc": "Estado de tu motor local y del servidor de OpenWork.",
   "settings.runtime_title": "Runtime",
   "settings.sandbox_requires_desktop": "La sonda Sandbox requiere una app de escritorio",
-  "settings.send_feedback": "Enviar comentarios",
+  "settings.send_feedback": "Informar de un problema",
   "settings.show_model_reasoning": "Mostrar razonamiento del modelo",
   "settings.show_model_reasoning_desc": "Amplíe las trazas de razonamiento en la interfaz de usuario cuando un modelo las exponga.",
   "settings.startup_remote_warning": "La preferencia de inicio está configurada actualmente en remoto. Ajusta la configuración del motor si hace falta.",

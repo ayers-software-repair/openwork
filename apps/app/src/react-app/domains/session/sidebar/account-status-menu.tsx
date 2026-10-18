@@ -58,7 +58,7 @@ import {
   useOpenWorkModelsPromoEligibility,
 } from "../../cloud/openwork-models-promo";
 
-const DOCS_URL = "https://openworklabs.com/docs";
+const DOCS_URL = "https://github.com/ayers-software-repair/howland-releases#readme";
 const BOOT_STARTED_AT = Date.now();
 const INITIALIZING_MS = 15_000;
 

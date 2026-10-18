@@ -592,7 +592,7 @@ export default {
   "settings.runtime_desc": "สถานะ engine ภายในเครื่องและ OpenWork server",
   "settings.runtime_title": "รันไทม์",
   "settings.sandbox_requires_desktop": "Sandbox probe ต้องใช้แอปเดสก์ท็อป",
-  "settings.send_feedback": "ส่งความคิดเห็น",
+  "settings.send_feedback": "รายงานปัญหา",
   "settings.show_model_reasoning": "แสดงการใช้เหตุผลของโมเดล",
   "settings.show_model_reasoning_desc": "ขยาย reasoning traces ใน UI เมื่อโมเดลรองรับ",
   "settings.startup_remote_warning": "ค่าเริ่มต้นการเปิดใช้งานเป็นระยะไกล การตั้งค่า engine",

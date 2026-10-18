@@ -595,7 +595,7 @@ export default {
   "settings.runtime_desc": "本地引擎和OpenWork服务器的状态。",
   "settings.runtime_title": "运行时",
   "settings.sandbox_requires_desktop": "沙箱探测需要桌面应用",
-  "settings.send_feedback": "发送反馈",
+  "settings.send_feedback": "报告问题",
   "settings.show_model_reasoning": "显示模型推理",
   "settings.show_model_reasoning_desc": "当模型提供推理过程时，在界面中展开推理轨迹。",
   "settings.startup_remote_warning": "启动偏好当前为远程。引擎设置",

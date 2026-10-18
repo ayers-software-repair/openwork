@@ -610,6 +610,9 @@ jobs:
           # CHECKED. A note about diligence sits there whether the next line was diligent or not.
           # Targets named on the command line replace the config's list (app-builder-lib
           # targetFactory computeArchToTargetNamesMap); only Linux needs it, to drop tar.gz.
+          # desktopName names the Linux .desktop file and the window's Wayland app id; upstream's
+          # package.json says com.differentai.openwork, so without this the installed launcher is
+          # upstream's file even though it opens Howland.
           TARGETS=()
           if [ "$RUNNER_OS" = "Linux" ]; then TARGETS=(--linux AppImage deb); fi
           # ${os}, ${arch}, ${version} and ${ext} are electron-builder macros, not shell variables.
@@ -617,6 +620,7 @@ jobs:
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
             -c.productName=Howland -c.appId=com.howland.app \
             -c.extraMetadata.version="$VERSION" \
+            -c.extraMetadata.desktopName=com.howland.app \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
             -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
             -c.extraMetadata.license="MIT" \

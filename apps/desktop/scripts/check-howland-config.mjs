@@ -66,6 +66,28 @@ if (cfg.npmRebuild !== true) {
   process.exit(1);
 }
 
+// Upstream's base config publishes to different-ai/openwork, and electron-builder writes the first
+// publish entry into the packaged app-update.yml. A list here would concatenate with upstream's, so
+// the override uses a single map, which replaces it; this asserts the merge result.
+const publish = Array.isArray(cfg.publish) ? cfg.publish : [cfg.publish];
+if (publish.length !== 1 || publish[0]?.owner !== "ayers-software-repair" || publish[0]?.repo !== "howland-releases") {
+  console.error(`publish must be exactly howland-releases, got ${JSON.stringify(cfg.publish)}.`);
+  process.exit(1);
+}
+
+// The deb target refuses to build without a project homepage (FpmTarget reads it from metadata).
+if (!cfg.extraMetadata?.homepage) {
+  console.error("extraMetadata.homepage is unset, so the deb target fails its option check.");
+  process.exit(1);
+}
+
+// The Windows Store package rides beside the NSIS installer, with a valid placeholder identity.
+const winTargets = [cfg.win?.target ?? []].flat().map((t) => (typeof t === "string" ? t : t.target));
+if (!winTargets.includes("nsis") || !winTargets.includes("appx") || !cfg.appx?.identityName) {
+  console.error(`win.target must carry nsis and appx with appx.identityName set, got ${JSON.stringify(cfg.win?.target)}.`);
+  process.exit(1);
+}
+
 // The licence notices must ship on every target. electron-builder only warns when an extraResources
 // source is missing and builds without it, so each source is checked here as well.
 const LICENCES = ["licenses/NOTICE.txt", "licenses/LICENSE.openwork.txt", "licenses/LICENSE.opencode.txt"];
@@ -81,4 +103,4 @@ for (const to of LICENCES) {
   }
 }
 
-console.log("both schemes present; parent config still merging; native rebuild on; licence notices packed.");
+console.log("both schemes present; parent config still merging; native rebuild on; publish, homepage and appx set; licence notices packed.");

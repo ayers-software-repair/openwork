@@ -31,6 +31,32 @@ deb:
   fpm:
     - "howland-copyright=/usr/share/doc/howland/copyright"
 
+# Rebuild native modules for Electron's ABI at pack time: the embedded server loads better-sqlite3
+# in the main process. Upstream's base config turns this off.
+npmRebuild: true
+
+# The release repository. A map, not a list: lists concatenate in the merge and would keep
+# upstream's different-ai/openwork entry, whose first entry electron-builder writes into the
+# packaged app-update.yml. A map replaces upstream's list outright.
+publish:
+  provider: github
+  owner: ayers-software-repair
+  repo: howland-releases
+  releaseType: release
+
+# The deb target refuses to build without a project homepage, which it reads from package metadata.
+extraMetadata:
+  homepage: https://ayers.repair/howland
+
+# The Windows Store package, concatenated onto upstream's nsis. electron-builder validates the
+# identity's shape at build time, and its default (from "@openwork/desktop") fails that rule.
+# Partner Center assigns the real identity at submission.
+win:
+  target:
+    - appx
+appx:
+  identityName: Howland.Desktop
+
 # The executable name, which on Linux also names the icon and the installed .desktop file.
 #
 # Unset, it does NOT fall back to productName the way the option's own description says. The Linux

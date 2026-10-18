@@ -486,15 +486,17 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "macOS notarization enabled (notarytool API key)."
 
-      # Main package step. On Ubuntu this builds AppImage + deb (both come from the
-      # electron-builder.yml linux.target list — see the comment there for why deb can't be
-      # added purely via a `-c` override). Branding stays build-time-only via `-c`.
+      # Main package step. On Ubuntu this builds AppImage + deb, named on the command line below:
+      # upstream's linux.target also lists tar.gz, and a config override can only add to a list.
+      # Branding stays build-time-only via `-c`.
       - name: Package Electron desktop (Howland installers)
         shell: bash
         env:
           # Kill upstream analytics: an empty key disables PostHog in any build (the resolver
           # otherwise falls back to upstream's hardcoded default key in prod builds).
           VITE_OPENWORK_POSTHOG_KEY: ""
+          # The renderer's Send feedback link (apps/app/src/app/lib/feedback.ts reads this).
+          VITE_OPENWORK_FEEDBACK_URL: https://github.com/ayers-software-repair/howland-releases/issues/new
           # The sidecar comes from the Howland-branded opencode fork, not upstream: the fork's
           # release v1.17.11-howland (upstream v1.17.11 + Howland TUI theme) carries the same
           # six asset names prepare-sidecar.mjs resolves. That release MUST exist before this
@@ -590,6 +592,10 @@ jobs:
           # scripts/check-builder-flags.sh checks these names against the installed schema now,
           # because THIS COMMENT CLAIMING VERIFICATION IS WHAT MADE THE UNVERIFIED LINE LOOK
           # CHECKED. A note about diligence sits there whether the next line was diligent or not.
+          # Targets named on the command line replace the config's list (app-builder-lib
+          # targetFactory computeArchToTargetNamesMap); only Linux needs it, to drop tar.gz.
+          TARGETS=()
+          if [ "$RUNNER_OS" = "Linux" ]; then TARGETS=(--linux AppImage deb); fi
           # ${os}, ${arch}, ${version} and ${ext} are electron-builder macros, not shell variables.
           # shellcheck disable=SC2016
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
@@ -604,6 +610,7 @@ jobs:
             -c.linux.synopsis="Howland" \
             '-c.deb.packageCategory=utils' \
             '-c.deb.priority=optional' \
+            "${TARGETS[@]}" \
             --publish never
 
       # --- Windows Authenticode (soft-fail, isolated + swappable) ---------------------------

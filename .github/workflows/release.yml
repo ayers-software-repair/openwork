@@ -462,21 +462,6 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "macOS signing enabled (Developer ID Application cert via CSC_LINK)."
 
-      # app-builder's bundled fpm is an x86 binary on every non-amd64 platform (its
-      # tool.go picks "-x86_64" for amd64 and "-x86" for everything else, and
-      # electron-builder-binaries publishes no linux-arm64 fpm at all), so the arm64 leg's
-      # .deb target cannot use it. USE_SYSTEM_FPM is app-builder's documented escape hatch;
-      # a system Ruby fpm builds the same package. Pinned so the .deb metadata is stable.
-      - name: System fpm for the arm64 .deb (app-builder ships no arm64 fpm)
-        if: ${{ matrix.os == 'ubuntu-24.04-arm' }}
-        run: |
-          set -euo pipefail
-          sudo apt-get update -q
-          sudo apt-get install -y -q ruby ruby-dev build-essential
-          sudo gem install fpm -v 1.15.1 --no-document
-          fpm --version
-          echo "USE_SYSTEM_FPM=true" >> "$GITHUB_ENV"
-
       # The after-sign hook (apps/desktop/scripts/electron-after-sign.cjs) notarizes only when
       # MACOS_NOTARIZE=true and needs APPLE_API_KEY_PATH (.p8 on disk), APPLE_API_KEY (key id)
       # and APPLE_API_ISSUER — the exact env set upstream's release-macos-aarch64.yml feeds
@@ -580,7 +565,7 @@ jobs:
           # feed), so those fields are matched by hand. The licence and copyright fields deliberately
           # do NOT follow the kit: this package is MIT-licensed OpenWork, not proprietary software.
           #
-          # EVERY -c. NAME BELOW IS VERIFIED AGAINST app-builder-lib 25.1.8
+          # EVERY -c. NAME BELOW IS VERIFIED AGAINST app-builder-lib 26.15.3
           # out/options/linuxOptions.d.ts. Two are traps: synopsis is the Debian SHORT
           # description (description is the long one), and linux.category is the freedesktop
           # MENU category — Section comes from deb.packageCategory.
@@ -593,7 +578,7 @@ jobs:
           # them after eight minutes of setup — and published nothing at all.
           #
           # THE LICENCE FIELD IS extraMetadata, NOT A LINUX OPTION — VERIFIED IN
-          # out/targets/FpmTarget.js:179, which reads packager.info.metadata.license and passes
+          # out/targets/FpmTarget.js:209, which reads packager.info.metadata.license and passes
           # it to fpm as --license. That is why `linux.license` could never have worked: the
           # value does not live under a platform key at all, so no amount of moving it between
           # linux/deb/appImage would have found it. Without this the published debs read

@@ -719,15 +719,22 @@ jobs:
           dpkg-deb -x "$deb" "$root"
           f="$root/usr/share/doc/howland/copyright"
           [ -f "$f" ] || { echo "::error::no copyright at usr/share/doc/howland/copyright — the fpm mapping did not apply, and fpm would not have said so"; exit 1; }
-          for want in "Copyright Ayers Electronics Inc." "proprietary freeware" "at no charge" "not open source" "General Public License"; do
+          for want in "Copyright Ayers Electronics Inc" "Copyright (c) 2026 Different AI" "Copyright (c) 2025 opencode" "Permission is hereby granted, free of charge"; do
             grep -qF "$want" "$f" || { echo "::error::copyright omits: $want"; exit 1; }
+          done
+          if grep -qiF "all rights reserved" "$f"; then
+            echo "::error::copyright claims all rights reserved over MIT code"; exit 1
+          fi
+          # The same notices packed as app resources, which is what every non-Debian target carries.
+          for lic in NOTICE.txt LICENSE.openwork.txt LICENSE.opencode.txt; do
+            [ -s "$root/opt/Howland/resources/licenses/$lic" ] || { echo "::error::resources/licenses/$lic not packed"; exit 1; }
           done
           # NEGATIVE: /opt is where afterPack and extraFiles would have put it, and where nothing
           # reads. A copy there means the mapping was replaced by one of those and looks fine.
           if [ -e "$root/opt/Howland/howland-copyright" ] || [ -e "$root/opt/Howland/copyright" ]; then
             echo "::error::a copyright landed under /opt — that is the directory nothing reads"; exit 1
           fi
-          echo "copyright present at $f, states the grant, and /opt is clean"
+          echo "copyright present at $f, carries both MIT notices, licences packed, and /opt is clean"
 
       # THE STORE PACKAGE GETS ITS STABLE NAME IN THE LEG, not in the release job's take().
       # take() renames on the way to the RELEASE DIRECTORY and .appx never goes there, so an appx

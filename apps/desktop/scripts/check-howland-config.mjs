@@ -59,6 +59,13 @@ for (const [key, value] of Object.entries({ appId: cfg.appId, afterPack: cfg.aft
   }
 }
 
+// The embedded server loads better-sqlite3 in Electron's main process, so the packaged copy must be
+// rebuilt for Electron's ABI. With npmRebuild off it keeps the host Node build and fails to load.
+if (cfg.npmRebuild !== true) {
+  console.error("npmRebuild is not true, so native modules ship built for Node rather than Electron.");
+  process.exit(1);
+}
+
 // The licence notices must ship on every target. electron-builder only warns when an extraResources
 // source is missing and builds without it, so each source is checked here as well.
 const LICENCES = ["licenses/NOTICE.txt", "licenses/LICENSE.openwork.txt", "licenses/LICENSE.opencode.txt"];
@@ -74,4 +81,4 @@ for (const to of LICENCES) {
   }
 }
 
-console.log("both schemes present; parent config still merging; licence notices packed.");
+console.log("both schemes present; parent config still merging; native rebuild on; licence notices packed.");

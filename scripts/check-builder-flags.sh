@@ -24,9 +24,18 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 WF=".github/workflows/release.yml"
-SCHEMA_DIR=$(find node_modules/.pnpm -maxdepth 6 -type d -path "*app-builder-lib@25*/node_modules/app-builder-lib/out/options" 2>/dev/null | head -1)
+# The schema of the app-builder-lib that electron-builder itself loads, resolved the way
+# apps/desktop/scripts/check-howland-config.mjs resolves it, so a version bump cannot leave this
+# check reading a stale copy or none.
+SCHEMA_DIR=$(node --input-type=module -e '
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+const fromDesktop = createRequire(join(process.cwd(), "apps/desktop/package.json"));
+const fromBuilder = createRequire(fromDesktop.resolve("electron-builder"));
+console.log(join(dirname(fromBuilder.resolve("app-builder-lib/package.json")), "out/options"));
+' 2>/dev/null || true)
 
-if [ -z "$SCHEMA_DIR" ]; then
+if [ -z "$SCHEMA_DIR" ] || [ ! -d "$SCHEMA_DIR" ]; then
   echo "check-builder-flags: app-builder-lib is not installed — run 'pnpm install' first." >&2
   echo "  Refusing to report a result: with no schema this check cannot fail, and a check that" >&2
   echo "  cannot fail reads exactly like a check that passed." >&2

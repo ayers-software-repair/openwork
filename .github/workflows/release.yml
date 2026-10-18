@@ -554,31 +554,16 @@ jobs:
 
           # THE COPYRIGHT FILE, at the path Debian actually reads. `linux.license` sets a control
           # field dpkg never looks at; /usr/share/doc/<pkg>/copyright is what `dpkg -L` leads to
-          # and what a licence audit greps. TEXT MIRRORS packaging/kit/linux/deb.sh, which writes
-          # the same file for every other package in the estate — change both in one pass.
-          cat > howland-copyright <<'COPY'
-          Copyright Ayers Electronics Inc. All rights reserved.
-
-          Howland is proprietary freeware. Ayers Electronics Inc grants a personal,
-          non-exclusive, non-transferable, revocable licence to install and use it in the
-          unmodified form in which it is distributed, for personal or internal business
-          purposes, on as many machines as you like, at no charge.
-
-          It is not open source. No source code is provided or promised.
-
-          Bundled third-party components remain under their own licences, and nothing here
-          limits the rights those licences grant you. Some are licensed under the GNU
-          General Public License or the GNU Affero General Public License.
-          COPY
-          # NOT `sed -i`. THIS STEP RUNS ON ALL THREE OSes AND macOS SHIPS BSD sed, where -i
-          # takes the backup suffix as its OWN argument: `sed -i 's/x//' f` there consumes the
-          # expression as the suffix and then reads the FILENAME as the script, which failed both
-          # macOS legs with `sed: 1: "howland-copyright": extra characters at the end of h
-          # command` — an error naming the file rather than the flag. GNU sed accepted it, so
-          # Linux and Windows were green and it looked platform-specific rather than portable-
-          # syntax-specific. Redirect-and-move is the form that means the same thing everywhere.
-          sed 's/^          //' howland-copyright > howland-copyright.tmp
-          mv howland-copyright.tmp howland-copyright
+          # and what a licence audit greps. It is the Howland notice followed by the full MIT text of
+          # OpenWork and of the bundled opencode runtime, concatenated from the same files the
+          # package ships under resources/licenses, so the two can never disagree.
+          {
+            cat resources/licenses/NOTICE.txt
+            printf '\n----- OpenWork -----\n\n'
+            cat ../../LICENSE
+            printf '\n----- opencode -----\n\n'
+            cat resources/licenses/LICENSE.opencode.txt
+          } > howland-copyright
 
           # The override is committed, so nothing is generated here. What this DOES check is the
           # merged result, which is the only thing that answers "does the packaged build register
@@ -589,11 +574,11 @@ jobs:
           test -f electron-builder.howland.yml
           node scripts/check-howland-config.mjs
           cd ../..
-          # deb metadata below MIRRORS packaging/kit/linux/deb.sh, the source of truth for it.
-          # This is the only package in the estate the kit does not build (it knows nothing of
-          # electron's layout, and electron-builder emits the latest-linux.yml updater feed), so
-          # the fields are matched by hand. Deliberate imitation, not redundancy — do not delete
-          # as duplicated defaults; if deb.sh changes one, change it here in the same pass.
+          # deb metadata below follows packaging/kit/linux/deb.sh for the maintainer, section and
+          # priority fields. This is the only package in the estate the kit does not build (it knows
+          # nothing of electron's layout, and electron-builder emits the latest-linux.yml updater
+          # feed), so those fields are matched by hand. The licence and copyright fields deliberately
+          # do NOT follow the kit: this package is MIT-licensed OpenWork, not proprietary software.
           #
           # EVERY -c. NAME BELOW IS VERIFIED AGAINST app-builder-lib 25.1.8
           # out/options/linuxOptions.d.ts. Two are traps: synopsis is the Debian SHORT
@@ -625,8 +610,8 @@ jobs:
             -c.extraMetadata.version="$VERSION" \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
             -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
-            -c.extraMetadata.license="Proprietary freeware" \
-            -c.copyright="Copyright Ayers Electronics Inc. All rights reserved." \
+            -c.extraMetadata.license="MIT" \
+            -c.copyright="Copyright (c) 2026 Different AI. Howland additions Copyright Ayers Electronics Inc. MIT License." \
             '-c.deb.maintainer=Ayers Electronics' \
             -c.linux.description="Howland - private, offline, self-hosted AI and survival library" \
             -c.linux.synopsis="Howland" \

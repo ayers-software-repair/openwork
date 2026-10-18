@@ -1,0 +1,23 @@
+Howland
+
+Howland is OpenWork, the open-source desktop application by Different AI, with
+branding, packaging and integration added by Ayers Electronics Inc. It bundles
+the opencode agent runtime.
+
+  OpenWork           Copyright (c) 2026 Different AI     MIT License
+  opencode           Copyright (c) 2025 opencode         MIT License
+  Howland additions  Copyright Ayers Electronics Inc     MIT License
+
+Ayers Electronics Inc distributes its additions under the same MIT terms as
+OpenWork. The full text of each licence is reproduced with this notice.
+
+This package contains no code from the /ee directory of the OpenWork
+repository, which is under a separate licence.
+
+OpenWork, opencode and the Electron runtime include third-party components
+that remain under their own licences. Nothing here limits the rights those
+licences grant you.
+
+Source code:
+  https://github.com/ayers-software-repair/openwork (howland branch)
+  https://github.com/ayers-software-repair/opencode (howland-sidecar branch)

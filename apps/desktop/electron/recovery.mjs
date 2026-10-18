@@ -61,6 +61,13 @@ export async function recordHealthyVersion(app, distribution, rawVersion) {
   return state;
 }
 
+// Recovery reads Howland's release train only, so it can never fetch an upstream OpenWork build.
+const RELEASE_DOWNLOAD_PATH = "/ayers-software-repair/howland-releases/releases/download/howland-v";
+
+export function recoveryReleaseBaseUrl(version) {
+  return `https://github.com${RELEASE_DOWNLOAD_PATH}${version}/`;
+}
+
 export function recoveryManifestName(platform, arch, distribution) {
   const channel = distribution === "public" ? "latest" : distribution;
   if (platform === "darwin") return `${channel}-mac.yml`;
@@ -103,7 +110,7 @@ function validRecoveryArtifactIdentity(artifact) {
   } catch {
     return false;
   }
-  const prefix = `/different-ai/openwork/releases/download/v${version}/`;
+  const prefix = `${RELEASE_DOWNLOAD_PATH}${version}/`;
   if (url.protocol !== "https:" || url.hostname !== "github.com" || !url.pathname.startsWith(prefix)) return false;
   const assetArch = artifact.platform === "linux" && artifact.arch === "x64" ? "x86_64" : artifact.arch;
   const platformSlug = artifact.platform === "darwin" ? "mac" : artifact.platform === "win32" ? "win" : "linux";
@@ -124,10 +131,10 @@ export function selectRecoveryArtifact(files, { version, platform, arch, distrib
     && typeof file.sha512 === "string"
     && file.sha512.trim(),
   );
-  const baseUrl = `https://github.com/different-ai/openwork/releases/download/v${normalizedVersion}/`;
+  const baseUrl = recoveryReleaseBaseUrl(normalizedVersion);
   for (const selected of matching) {
     const url = new URL(selected.url, baseUrl);
-    if (url.origin !== "https://github.com" || !url.pathname.startsWith(`/different-ai/openwork/releases/download/v${normalizedVersion}/`)) {
+    if (url.origin !== "https://github.com" || !url.pathname.startsWith(`${RELEASE_DOWNLOAD_PATH}${normalizedVersion}/`)) {
       continue;
     }
     const artifact = {

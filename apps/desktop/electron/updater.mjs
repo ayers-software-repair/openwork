@@ -12,6 +12,7 @@ import {
   readRecoveryState,
   recordHealthyVersion,
   recoveryManifestName,
+  recoveryReleaseBaseUrl,
   recoveryVersionMarkers,
   selectRecoveryArtifact,
   stableVersion,
@@ -468,7 +469,7 @@ export function registerUpdaterIpc({
   async function resolveRecoveryArtifact(version) {
     if (!electronNet?.fetch) return null;
     try {
-      const manifestUrl = `https://github.com/different-ai/openwork/releases/download/v${version}/${recoveryManifestName(platform, arch, distribution)}`;
+      const manifestUrl = `${recoveryReleaseBaseUrl(version)}${recoveryManifestName(platform, arch, distribution)}`;
       const response = await electronNet.fetch(manifestUrl, { headers: { Accept: "text/yaml, text/plain, */*" } });
       if (!response.ok) return null;
       return selectRecoveryArtifact(parseRecoveryManifest(await response.text()), {

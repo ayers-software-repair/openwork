@@ -610,7 +610,7 @@ jobs:
             -c.linux.synopsis="Howland" \
             '-c.deb.packageCategory=utils' \
             '-c.deb.priority=optional' \
-            "${TARGETS[@]}" \
+            ${TARGETS[@]+"${TARGETS[@]}"} \
             --publish never
 
       # --- Windows Authenticode (soft-fail, isolated + swappable) ---------------------------

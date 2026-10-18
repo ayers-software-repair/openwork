@@ -16,6 +16,8 @@ runs:
       env:
         # Kill upstream analytics: an empty key disables PostHog in any build.
         VITE_OPENWORK_POSTHOG_KEY: ""
+        # The Send feedback link (apps/app/src/app/lib/feedback.ts reads this).
+        VITE_OPENWORK_FEEDBACK_URL: https://github.com/ayers-software-repair/howland-releases/issues/new
       run: pnpm --filter @openwork/app run build:web
 
     - name: Stage web bundle into mobile/dist

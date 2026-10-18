@@ -705,9 +705,9 @@ jobs:
 
       # ASSERT AT THE ARTEFACT, NEVER AT THE ARG STRING. A malformed fpm argument is IGNORED
       # SILENTLY — that is the whole reason deb.fpm needed a condition attached — so the only
-      # honest check extracts the built package and looks. Three claims, and the third is the one
-      # a positive-only check would miss: the file is THERE, it SAYS the grant, and it did NOT
-      # leak into the AppImage.
+      # honest check extracts the built package and looks. The copyright file is THERE, carries
+      # both MIT notices and no "all rights reserved", the licences are packed as resources, and
+      # nothing landed under /opt where no reader looks.
       - name: The deb carries its copyright where Debian looks
         if: ${{ runner.os == 'Linux' }}
         shell: bash

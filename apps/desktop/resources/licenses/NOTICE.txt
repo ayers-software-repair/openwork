@@ -17,7 +17,3 @@ repository, which is under a separate licence.
 OpenWork, opencode and the Electron runtime include third-party components
 that remain under their own licences. Nothing here limits the rights those
 licences grant you.
-
-Source code:
-  https://github.com/ayers-software-repair/openwork (howland branch)
-  https://github.com/ayers-software-repair/opencode (howland-sidecar branch)

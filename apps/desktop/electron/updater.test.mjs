@@ -236,9 +236,9 @@ describe("recovery metadata and candidates", () => {
 
   it("accepts only the exact platform, architecture, distribution release artifact", () => {
     const files = [
-      { url: "openwork-mac-x64-1.2.3.dmg", sha512: "wrong-arch" },
-      { url: "https://tampered.invalid/openwork-mac-arm64-1.2.3.dmg", sha512: "tampered" },
-      { url: "openwork-mac-arm64-1.2.3.dmg", sha512: "verified" },
+      { url: "Howland-Desktop-macOS-x64.dmg", sha512: "wrong-arch" },
+      { url: "https://tampered.invalid/Howland-Desktop-macOS-arm64.dmg", sha512: "tampered" },
+      { url: "Howland-Desktop-macOS-arm64.dmg", sha512: "verified" },
     ];
     assert.deepEqual(selectRecoveryArtifact(files, {
       version: "1.2.3",
@@ -250,7 +250,7 @@ describe("recovery metadata and candidates", () => {
       platform: "darwin",
       arch: "arm64",
       distribution: "public",
-      url: "https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v1.2.3/openwork-mac-arm64-1.2.3.dmg",
+      url: "https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v1.2.3/Howland-Desktop-macOS-arm64.dmg",
       sha512: "verified",
     });
     assert.equal(selectRecoveryArtifact(files, {
@@ -261,51 +261,61 @@ describe("recovery metadata and candidates", () => {
     }), null);
   });
 
-  it("accepts each artifact flavor only for its matching distribution", () => {
-    const artifacts = {
-      public: "openwork-mac-arm64-1.2.3.dmg",
-      cloud: "openwork-cloud-mac-arm64-1.2.3.dmg",
-      enterprise: "openwork-enterprise-mac-arm64-1.2.3.dmg",
-    };
-    for (const [distribution, fileName] of Object.entries(artifacts)) {
-      const files = [{ url: fileName, sha512: `${distribution}-checksum` }];
+  it("fails closed for the distributions Howland does not publish", () => {
+    const files = [{ url: "Howland-Desktop-macOS-arm64.dmg", sha512: "public-checksum" }];
+    assert.equal(selectRecoveryArtifact(files, {
+      version: "1.2.3", platform: "darwin", arch: "arm64", distribution: "public",
+    })?.url, "https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v1.2.3/Howland-Desktop-macOS-arm64.dmg");
+    for (const distribution of ["cloud", "enterprise"]) {
       assert.equal(selectRecoveryArtifact(files, {
         version: "1.2.3", platform: "darwin", arch: "arm64", distribution,
-      })?.url, `https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v1.2.3/${fileName}`);
-      for (const otherDistribution of Object.keys(artifacts).filter((flavor) => flavor !== distribution)) {
-        assert.equal(selectRecoveryArtifact(files, {
-          version: "1.2.3", platform: "darwin", arch: "arm64", distribution: otherDistribution,
-        }), null);
-      }
+      }), null);
+    }
+  });
+
+  it("finds each leg's shipped installer through the channel file it publishes", () => {
+    const { assets } = JSON.parse(readFileSync(new URL("../../../packaging/platforms.json", import.meta.url), "utf8"));
+    const platforms = { linux: "linux", macos: "darwin", windows: "win32" };
+    const installerExtension = { linux: ".AppImage", darwin: ".dmg", win32: ".exe" };
+    const legs = assets.filter((asset) => platforms[asset.platform] && asset.name.endsWith(".yml"));
+    assert.equal(legs.length, 6);
+    for (const leg of legs) {
+      const platform = platforms[leg.platform];
+      const installer = assets.find((asset) => asset.platform === leg.platform && asset.arch === leg.arch
+        && asset.name.endsWith(installerExtension[platform])).name;
+      assert.equal(recoveryManifestName(platform, leg.arch, "public"), leg.name);
+      const files = [{ url: installer, sha512: "verified" }];
+      assert.equal(
+        selectRecoveryArtifact(files, { version: "1.2.3", platform, arch: leg.arch, distribution: "public" })?.url,
+        `https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v1.2.3/${installer}`,
+        `${platform} ${leg.arch}`,
+      );
     }
   });
 
   it("parses representative builder manifests and selects published installer extensions", () => {
     const files = parseRecoveryManifest(`version: 1.2.3
 files:
-  - url: openwork-mac-arm64-1.2.3.dmg
+  - url: Howland-Desktop-macOS-arm64.dmg
     sha512: mac-checksum
     size: 100
-  - url: openwork-cloud-win-x64-1.2.3.exe
-    sha512: win-checksum
-  - url: openwork-enterprise-linux-x86_64-1.2.3.AppImage
+  - url: Howland-Desktop-Linux-x64.deb
+    sha512: deb-checksum
+  - url: Howland-Desktop-Linux-x64.AppImage
     sha512: linux-checksum
-path: openwork-mac-arm64-1.2.3.zip
+path: Howland-Desktop-macOS-arm64.zip
 sha512: updater-zip-checksum
 releaseDate: '2026-08-11T00:00:00.000Z'
 `);
     assert.equal(selectRecoveryArtifact(files, {
       version: "1.2.3", platform: "darwin", arch: "arm64", distribution: "public",
-    })?.url.endsWith(".dmg"), true);
+    })?.sha512, "mac-checksum");
     assert.equal(selectRecoveryArtifact(files, {
-      version: "1.2.3", platform: "win32", arch: "x64", distribution: "cloud",
-    })?.url.endsWith(".exe"), true);
+      version: "1.2.3", platform: "linux", arch: "x64", distribution: "public",
+    })?.sha512, "linux-checksum");
     assert.equal(selectRecoveryArtifact(files, {
-      version: "1.2.3", platform: "linux", arch: "x64", distribution: "enterprise",
-    })?.url.endsWith(".AppImage"), true);
-    assert.equal(recoveryManifestName("darwin", "arm64", "public"), "latest-mac.yml");
-    assert.equal(recoveryManifestName("win32", "x64", "cloud"), "cloud.yml");
-    assert.equal(recoveryManifestName("linux", "arm64", "enterprise"), "enterprise-linux-arm64.yml");
+      version: "1.2.3", platform: "win32", arch: "x64", distribution: "public",
+    }), null);
   });
 
   it("rejects a checksum mismatch without producing a cached installer", async () => {
@@ -333,7 +343,7 @@ releaseDate: '2026-08-11T00:00:00.000Z'
       platform: "darwin",
       arch: "arm64",
       distribution: "public",
-      url: "https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v1.2.3/openwork-mac-arm64-1.2.3.dmg",
+      url: "https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v1.2.3/Howland-Desktop-macOS-arm64.dmg",
       sha512: createHash("sha512").update(bytes).digest("base64"),
     };
     try {
@@ -369,7 +379,7 @@ releaseDate: '2026-08-11T00:00:00.000Z'
       platform: "darwin",
       arch: "arm64",
       distribution: "public",
-      url: "https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v0.18.18/openwork-mac-arm64-0.18.18.dmg",
+      url: "https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v0.18.18/Howland-Desktop-macOS-arm64.dmg",
       sha512: createHash("sha512").update(bytes).digest("base64"),
     };
     const expected = { platform: "darwin", arch: "arm64", distribution: "public" };
@@ -401,7 +411,7 @@ releaseDate: '2026-08-11T00:00:00.000Z'
       platform: "darwin",
       arch: "arm64",
       distribution: "public",
-      url: "https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v1.9.0/openwork-mac-arm64-1.9.0.dmg",
+      url: "https://github.com/ayers-software-repair/howland-releases/releases/download/howland-v1.9.0/Howland-Desktop-macOS-arm64.dmg",
       sha512: createHash("sha512").update(bytes).digest("base64"),
     };
     const handlers = new Map();
@@ -450,7 +460,7 @@ releaseDate: '2026-08-11T00:00:00.000Z'
     const handlers = new Map();
     const destructiveCalls = [];
     let candidateFetches = 0;
-    const manifest = (checksum) => `version: 1.9.0\nfiles:\n  - url: openwork-mac-arm64-1.9.0.dmg\n    sha512: ${checksum}\n`;
+    const manifest = (checksum) => `version: 1.9.0\nfiles:\n  - url: Howland-Desktop-macOS-arm64.dmg\n    sha512: ${checksum}\n`;
     try {
       isolatedUpdaterImportId += 1;
       const isolated = await import(`./updater.mjs?fresh-mismatch=${isolatedUpdaterImportId}`);

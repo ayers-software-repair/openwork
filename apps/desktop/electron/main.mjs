@@ -24,6 +24,7 @@ import { configureFakeMediaForTests, installMediaPermissionHandlers } from "./me
 import { registerMigrationIpc } from "./migration.mjs";
 import { createRuntimeManager, createSystemCaCertificateVerifyProc } from "./runtime.mjs";
 import { registerUpdaterIpc, resolveAppVersion } from "./updater.mjs";
+import { howlandAssetName, howlandManifestChannel } from "./howland-release.mjs";
 import { createUiControlServer } from "./ui-control-server.mjs";
 import { createApplicationMenu } from "./app-menu.mjs";
 import { createNativeContextMenus } from "./context-menu.mjs";
@@ -324,25 +325,6 @@ function resolveSystemArch() {
   return normalizeRuntimeArch(os.arch());
 }
 
-// Howland releases carry stable, version-free installer names, so the other architecture's
-// installer is a fixed URL rather than an entry in an updater manifest.
-function howlandAssetName(arch) {
-  const a = arch === "arm64" ? "arm64" : "x64";
-  if (process.platform === "darwin") return `Howland-Desktop-macOS-${a}.dmg`;
-  if (process.platform === "win32") return `Howland-Desktop-Windows-${a}.exe`;
-  return `Howland-Desktop-Linux-${a}.AppImage`;
-}
-
-// The release publishes one updater file per platform and architecture. electron-updater adds
-// "-mac" or "-linux[-arch]" to the channel itself (Provider.getCustomChannelName), so only the
-// two legs whose file differs from its default need a channel: Windows arm64 reads
-// latest-arm64.yml and Intel macOS reads latest-x64-mac.yml.
-function howlandManifestChannel() {
-  if (process.platform === "win32" && process.arch === "arm64") return "latest-arm64";
-  if (process.platform === "darwin" && process.arch !== "arm64") return "latest-x64";
-  return "latest";
-}
-
 function archLabel(arch) {
   if (arch === "arm64") return "ARM";
   if (arch === "x64") return "Intel";
@@ -351,7 +333,7 @@ function archLabel(arch) {
 
 async function resolveCorrectArchitectureDownloadUrl(arch) {
   // Confirm the asset exists so the banner never offers a dead link.
-  const url = `${RELEASE_DOWNLOAD_BASE_URL}/${howlandAssetName(arch)}`;
+  const url = `${RELEASE_DOWNLOAD_BASE_URL}/${howlandAssetName(process.platform, arch)}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
@@ -2675,7 +2657,7 @@ const { ensureAutoUpdater } = registerUpdaterIpc({
   getMainWindow: () => mainWindow,
   // Squirrel.Mac derives the ShipIt domain from the bundle id, which is Howland's.
   shipItDefaultsDomain: `${HOWLAND_APP_IDENTIFIER}.ShipIt`,
-  manifestChannel: howlandManifestChannel(),
+  manifestChannel: howlandManifestChannel(process.platform, process.arch),
   electronNet,
   shell,
   distribution: DESKTOP_DISTRIBUTION.flavor,

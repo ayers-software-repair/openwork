@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { howlandAssetName, howlandManifestFile } from "./howland-release.mjs";
+
 const RECOVERY_STATE_FILENAME = "app-recovery.v1.json";
 const RECOVERY_CACHE_DIRECTORY = "app-recovery-cache";
 const STABLE_VERSION = /^\d+\.\d+\.\d+$/;
@@ -69,10 +71,7 @@ export function recoveryReleaseBaseUrl(version) {
 }
 
 export function recoveryManifestName(platform, arch, distribution) {
-  const channel = distribution === "public" ? "latest" : distribution;
-  if (platform === "darwin") return `${channel}-mac.yml`;
-  if (platform === "win32") return `${channel}.yml`;
-  return `${channel}-linux${arch === "arm64" ? "-arm64" : ""}.yml`;
+  return howlandManifestFile(platform, arch, distribution === "public" ? "latest" : distribution);
 }
 
 export function parseRecoveryManifest(raw) {
@@ -91,12 +90,6 @@ export function parseRecoveryManifest(raw) {
   return files;
 }
 
-function installerExtension(platform) {
-  if (platform === "darwin") return ".dmg";
-  if (platform === "win32") return ".exe";
-  return ".AppImage";
-}
-
 function validRecoveryArtifactIdentity(artifact) {
   const version = stableVersion(artifact?.version);
   if (!version || artifact.version !== version) return false;
@@ -112,22 +105,19 @@ function validRecoveryArtifactIdentity(artifact) {
   }
   const prefix = `${RELEASE_DOWNLOAD_PATH}${version}/`;
   if (url.protocol !== "https:" || url.hostname !== "github.com" || !url.pathname.startsWith(prefix)) return false;
-  const assetArch = artifact.platform === "linux" && artifact.arch === "x64" ? "x86_64" : artifact.arch;
-  const platformSlug = artifact.platform === "darwin" ? "mac" : artifact.platform === "win32" ? "win" : "linux";
-  const fileName = path.basename(url.pathname);
-  const distributionSlug = artifact.distribution === "public" ? "" : `${artifact.distribution}-`;
-  return fileName === `openwork-${distributionSlug}${platformSlug}-${assetArch}-${version}${installerExtension(artifact.platform)}`;
+  // Howland publishes the public distribution only, so a cloud or enterprise build has nothing to
+  // recover into and fails closed rather than installing the public app.
+  return artifact.distribution === "public"
+    && path.basename(url.pathname) === howlandAssetName(artifact.platform, artifact.arch);
 }
 
 export function selectRecoveryArtifact(files, { version, platform, arch, distribution }) {
   const normalizedVersion = stableVersion(version);
   if (!normalizedVersion || !["public", "cloud", "enterprise"].includes(distribution)) return null;
-  const assetArch = platform === "linux" && arch === "x64" ? "x86_64" : arch;
-  const extension = installerExtension(platform);
+  const assetName = howlandAssetName(platform, arch);
   const matching = files.filter((file) =>
     typeof file?.url === "string"
-    && file.url.includes(`-${assetArch}-`)
-    && file.url.endsWith(extension)
+    && path.posix.basename(file.url) === assetName
     && typeof file.sha512 === "string"
     && file.sha512.trim(),
   );

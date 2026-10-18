@@ -57,6 +57,11 @@ win:
 appx:
   identityName: Howland.Desktop
 
+# The macOS microphone prompt. A map key, so it replaces upstream's text in the merge.
+mac:
+  extendInfo:
+    NSMicrophoneUsageDescription: Howland uses the microphone when you ask a question by voice.
+
 # The executable name, which on Linux also names the icon and the installed .desktop file.
 #
 # Unset, it does NOT fall back to productName the way the option's own description says. The Linux

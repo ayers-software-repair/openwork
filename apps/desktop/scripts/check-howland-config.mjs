@@ -88,6 +88,12 @@ if (!winTargets.includes("nsis") || !winTargets.includes("appx") || !cfg.appx?.i
   process.exit(1);
 }
 
+// The macOS microphone prompt must name Howland, not upstream.
+if (cfg.mac?.extendInfo?.NSMicrophoneUsageDescription !== "Howland uses the microphone when you ask a question by voice.") {
+  console.error(`mac.extendInfo.NSMicrophoneUsageDescription is ${JSON.stringify(cfg.mac?.extendInfo?.NSMicrophoneUsageDescription)}.`);
+  process.exit(1);
+}
+
 // The licence notices must ship on every target. electron-builder only warns when an extraResources
 // source is missing and builds without it, so each source is checked here as well.
 const LICENCES = ["licenses/NOTICE.txt", "licenses/LICENSE.openwork.txt", "licenses/LICENSE.opencode.txt"];

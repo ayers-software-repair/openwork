@@ -1,4 +1,3 @@
-import { prepareOpencodeV2 } from "./prepare-opencode-v2.mjs";
 import { spawnSync } from "child_process";
 import { createHash } from "crypto";
 import {
@@ -335,9 +334,7 @@ if (shouldDownloadOpencode) {
   console.log(`OpenCode sidecar updated to ${normalizedOpencodeVersion}.`);
 }
 
-const opencodeV2Path = await prepareOpencodeV2(sidecarDir, resolvedTargetTriple);
-const opencodeV2TargetPath = join(sidecarDir, `opencode2-${resolvedTargetTriple}${isWindowsTarget ? ".exe" : ""}`);
-copyFileSync(opencodeV2Path, opencodeV2TargetPath);
+// Howland ships the opencode sidecar only; the opencode v2 binary is neither fetched nor packaged.
 
 adHocSignDarwinSidecars([
   opencodePath,
@@ -355,10 +352,6 @@ const openworkServerVersion = (() => {
 })();
 
 const versions = {
-  opencode2: {
-    version: JSON.parse(readFileSync(constantsPath, "utf8")).opencodeV2Version,
-    sha256: sha256File(opencodeV2Path),
-  },
   opencode: {
     version: normalizedOpencodeVersion,
     sha256: opencodeCandidatePath && existsSync(opencodeCandidatePath) ? sha256File(opencodeCandidatePath) : null,

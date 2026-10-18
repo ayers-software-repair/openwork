@@ -2,9 +2,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const asar = require("@electron/asar");
 
+// Howland packages no opencode2 sidecar.
 const sidecarBases = [
   "opencode",
-  "opencode2",
 ];
 
 function targetTriple(platformName, arch) {

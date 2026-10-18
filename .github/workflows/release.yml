@@ -590,6 +590,8 @@ jobs:
           # scripts/check-builder-flags.sh checks these names against the installed schema now,
           # because THIS COMMENT CLAIMING VERIFICATION IS WHAT MADE THE UNVERIFIED LINE LOOK
           # CHECKED. A note about diligence sits there whether the next line was diligent or not.
+          # ${os}, ${arch}, ${version} and ${ext} are electron-builder macros, not shell variables.
+          # shellcheck disable=SC2016
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
             -c.productName=Howland -c.appId=com.howland.app \
             -c.extraMetadata.version="$VERSION" \
@@ -736,7 +738,11 @@ jobs:
             windows)       want=Howland-Desktop-Windows-x64.appx ;;
             windows-arm64) want=Howland-Desktop-Windows-arm64.appx ;;
           esac
-          src=$(ls *.appx 2>/dev/null | head -1)
+          # A glob array, not `ls | head`: under pipefail a failed ls exits here, before the error below.
+          shopt -s nullglob
+          appx=(./*.appx)
+          src=${appx[0]:-}
+          src=${src#./}
           # An absent appx is a BUILD failure, not a naming one: the target is declared
           # unconditionally, so nothing legitimately produces zero of them.
           test -n "$src" || { echo "::error::appx target produced nothing"; exit 1; }

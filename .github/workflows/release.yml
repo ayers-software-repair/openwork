@@ -344,7 +344,7 @@ jobs:
             macos)
               owed="Howland-Desktop-macOS-arm64.dmg Howland-Desktop-macOS-arm64.zip latest-mac.yml" ;;
             macos-intel)
-              owed="Howland-Desktop-macOS-x64.dmg Howland-Desktop-macOS-x64.zip latest-mac-x64.yml" ;;
+              owed="Howland-Desktop-macOS-x64.dmg Howland-Desktop-macOS-x64.zip latest-x64-mac.yml" ;;
             windows)
               owed="Howland-Desktop-Windows-x64.exe latest.yml" ;;
             windows-arm64)
@@ -659,7 +659,7 @@ jobs:
           cd apps/desktop/dist-electron
           case "${{ matrix.artifact }}" in
             macos)         SRC=latest-mac.yml;  OUT=latest-mac.yml ;;
-            macos-intel)   SRC=latest-mac.yml;  OUT=latest-mac-x64.yml ;;
+            macos-intel)   SRC=latest-mac.yml;  OUT=latest-x64-mac.yml ;;
             windows)       SRC=latest.yml;      OUT=latest.yml ;;
             windows-arm64) SRC=latest.yml;      OUT=latest-arm64.yml ;;
             linux)         SRC=latest-linux.yml;       OUT=latest-linux.yml ;;
@@ -1247,7 +1247,7 @@ jobs:
           if [ "$SEL_MACOS" = "true" ]; then
             EXPECTED="$EXPECTED Howland-Desktop-macOS-arm64.dmg Howland-Desktop-macOS-arm64.zip"
             EXPECTED="$EXPECTED Howland-Desktop-macOS-x64.dmg Howland-Desktop-macOS-x64.zip"
-            EXPECTED="$EXPECTED latest-mac.yml latest-mac-x64.yml"
+            EXPECTED="$EXPECTED latest-mac.yml latest-x64-mac.yml"
           else deselected="$deselected macOS"; fi
           if [ "$SEL_WINDOWS" = "true" ]; then
             EXPECTED="$EXPECTED Howland-Desktop-Windows-x64.exe Howland-Desktop-Windows-arm64.exe"

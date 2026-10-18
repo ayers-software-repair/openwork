@@ -66,7 +66,7 @@ function section(text, startsWith, endsWith) {
 //
 // THE EXTENSION IS DELIBERATELY NOT AN ALLOWLIST and there is NO Howland- PREFIX ANCHOR. Six of
 // these twenty assets are electron-updater feeds -- latest.yml, latest-arm64.yml, latest-mac.yml,
-// latest-mac-x64.yml, latest-linux.yml, latest-linux-arm64.yml -- whose filenames ARE the
+// latest-x64-mac.yml, latest-linux.yml, latest-linux-arm64.yml -- whose filenames ARE the
 // protocol request. howland's server parser anchors on `Howland-Server-` because every server
 // asset carries it; ported unchanged, that anchor drops 30% of this train silently and the
 // comparison still passes.
@@ -235,7 +235,7 @@ const grammarExceptions = {
   "latest-mac.yml":
     "electron-updater fetches <channel>.yml BY PROTOCOL — the filename is the request, not a " +
     "label, and only the updater ever reads it.",
-  "latest-mac-x64.yml": "see latest-mac.yml.",
+  "latest-x64-mac.yml": "see latest-mac.yml.",
   "latest.yml": "see latest-mac.yml.",
   "latest-arm64.yml": "see latest-mac.yml.",
   "latest-linux.yml": "see latest-mac.yml.",

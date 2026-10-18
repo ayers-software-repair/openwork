@@ -115,7 +115,7 @@
       "arch": "x64",
       "channel": "release",
       "published": false,
-      "why": "the update payload for latest-mac-x64.yml, gated by the same certificate as its .dmg."
+      "why": "the update payload for latest-x64-mac.yml, gated by the same certificate as its .dmg."
     },
     {
       "name": "latest-mac.yml",
@@ -126,7 +126,7 @@
       "why": "the updater feed rides with the payload it names; an unsigned leg's feed is excluded by artifact path with the binaries it describes."
     },
     {
-      "name": "latest-mac-x64.yml",
+      "name": "latest-x64-mac.yml",
       "platform": "macos",
       "arch": "x64",
       "channel": "release",

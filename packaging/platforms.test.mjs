@@ -65,11 +65,11 @@ function section(text, startsWith, endsWith) {
 // by the workflow itself.
 //
 // THE EXTENSION IS DELIBERATELY NOT AN ALLOWLIST and there is NO Howland- PREFIX ANCHOR. Six of
-// these twenty assets are electron-updater feeds -- latest.yml, latest-arm64.yml, latest-mac.yml,
-// latest-x64-mac.yml, latest-linux.yml, latest-linux-arm64.yml -- whose filenames ARE the
-// protocol request. howland's server parser anchors on `Howland-Server-` because every server
-// asset carries it; ported unchanged, that anchor drops 30% of this train silently and the
-// comparison still passes.
+// these seventeen assets are electron-updater feeds -- latest.yml, latest-arm64.yml,
+// latest-mac.yml, latest-x64-mac.yml, latest-linux.yml, latest-linux-arm64.yml -- whose filenames
+// ARE the protocol request. howland's server parser anchors on `Howland-Server-` because every
+// server asset carries it; ported unchanged, that anchor drops a third of this train silently and
+// the comparison still passes.
 function releaseAssets() {
   const wf = workflowWithoutComments("release.yml");
   const step = section(wf, "- name: Reconcile against the expected assets", "GITHUB_STEP_SUMMARY");
@@ -106,7 +106,13 @@ function storeAssets() {
   }
   // .appx is built on the desktop leg in release.yml and collected as an Actions artifact only.
   // take() globs by extension and no glob names .appx, so it cannot reach the release directory.
-  for (const m of workflowWithoutComments("release.yml").match(/Howland-[A-Za-z0-9.-]+\.appx\b/g) ?? []) {
+  const wf = workflowWithoutComments("release.yml");
+  for (const m of wf.match(/Howland-[A-Za-z0-9.-]+\.appx\b/g) ?? []) {
+    names.add(m);
+  }
+  // The Android store packages, read from the step that stages them for submission.
+  const android = section(wf, "- name: Stage Android store packages", "- name: Upload Android store packages");
+  for (const m of android.match(/Howland-[A-Za-z0-9.-]+\.(apk|aab)\b/g) ?? []) {
     names.add(m);
   }
   return names;
@@ -115,14 +121,13 @@ function storeAssets() {
 // THE CANNOT-FAIL CONTROL, PER FAMILY RATHER THAN PER COUNT.
 //
 // howland's control is `len(built) < 5` against a nine-asset train. Ported as a number to a
-// twenty-asset train it passes on three parsed names, so a parser that found only the mobile
-// family would satisfy it and every comparison below would run against a set missing seventeen
+// seventeen-asset train it passes on five parsed names, so a parser that found only the updater
+// feeds would satisfy it and every comparison below would run against a set missing eleven
 // assets. A COUNT CONTROL SATISFIABLE BY ONE FAMILY IS A CHECK THAT FINDS PROSE WEARING A NEW HAT.
 // Each family is asserted present by a predicate that only its own members can satisfy.
 const families = {
   "desktop installer": (n) => /^Howland-Desktop-(macOS|Windows|Linux)-/.test(n),
   "updater metadata": (n) => /^latest[a-z0-9-]*\.yml$/.test(n),
-  "mobile client": (n) => /^Howland-Client-Android/.test(n),
   "checksum manifest": (n) => /-CHECKSUMS\.txt$/.test(n),
 };
 
@@ -136,9 +141,13 @@ test("the parser reads every family out of release.yml, not just one", () => {
     );
   }
   assert.ok(
-    built.size >= 20,
-    `parsed ${built.size} names from release.yml, expected at least 20 — the reconcile step is ` +
+    built.size >= 17,
+    `parsed ${built.size} names from release.yml, expected at least 17 — the reconcile step is ` +
       `no longer being read whole`,
+  );
+  assert.ok(
+    ![...built].some((n) => n.startsWith("Howland-Client-")),
+    "a mobile client is on the release page — phones install from stores only (D1625)",
   );
 });
 
@@ -225,12 +234,11 @@ const grammarArches = new Set(["x64", "arm64"]);
 // Each exception carries the reason it is one; an undocumented exception is drift.
 const grammarExceptions = {
   "Howland-Desktop-CHECKSUMS.txt": "release metadata: names its component, has no platform or arch.",
-  "Howland-Client-CHECKSUMS.txt": "release metadata: names its component, has no platform or arch.",
   "Howland-Client-Android.apk": "one fat apk carries every ABI, so there is no arch to name.",
   "Howland-Client-Android.aab": "Play splits per device; arch is not applicable.",
   "Howland-Client-Android-debug.apk":
     "the unsigned twin. It takes the arch slot with a BUILD TYPE deliberately: it is not a fourth " +
-    "architecture and must never be mistaken for the sideload asset, so it reads wrong to a human " +
+    "architecture and must never be mistaken for the store apk, so it reads wrong to a human " +
     "on purpose. It never reaches the page, where a name that misparses would matter.",
   "latest-mac.yml":
     "electron-updater fetches <channel>.yml BY PROTOCOL — the filename is the request, not a " +

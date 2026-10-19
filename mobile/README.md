@@ -70,11 +70,11 @@ env vars in `capacitor.config.ts` control this:
 ## Release workflow and signing
 
 Android builds in **`.github/workflows/release.yml`** (the one desktop+mobile release; the
-separate mobile workflow is folded in). The `build-android` leg publishes
-`Howland-Client-Android.apk` / `.aab` + `Howland-Client-CHECKSUMS.txt` onto the shared
-`howland-v1.0.0` release. Without its signing secrets the leg SKIPS and the run summary names
-the missing secret — there is no unsigned compile-proof mode any more; the release publishes
-what it can sign.
+separate mobile workflow is folded in). The `build-android` leg uploads the signed
+`Howland-Client-Android.aab` (Google Play) and `.apk` (Amazon Appstore) as the `store-android`
+Actions artifact for store submission; neither ever reaches the release page, because phones
+install from stores only (owner, D1625). Without its signing secrets the leg builds only the
+debug-signed `unsigned-android` twin for testing.
 
 iOS builds in **`.github/workflows/ios-submission.yml`** — its own dispatch, out of the
 release chain. It HARD FAILS without signing secrets, and its `.ipa` is a 90-day CI artifact

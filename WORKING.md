@@ -10,8 +10,10 @@ this file carries only what is specific to this fork.
 `different-ai/openwork` fork (`upstream` remote), default branch `howland`, MIT surface only —
 never touch or redistribute `/ee` (FSL). Branding is build-time overrides only
 (electron-builder `-c` flags, env, icon swap); no internal renames, so upstream still merges.
-pnpm only. It builds Howland's DESKTOP (six OS/arch legs) and ANDROID heads and publishes them
-onto the one `howland-v1.0.0` release of `ayers-software-repair/howland-releases`.
+pnpm only. It builds Howland's DESKTOP (six OS/arch legs) and publishes them onto the one
+`howland-v1.0.0` release of `ayers-software-repair/howland-releases`. ANDROID builds the store
+packages only (Play `.aab`, Amazon `.apk`) as the `store-android` Actions artifact: phones install
+from stores only and nothing side-loads (owner, D1625).
 
 ## The workflows (all of them — 20 of 22 upstream workflows are deleted)
 
@@ -58,7 +60,7 @@ onto the one `howland-v1.0.0` release of `ayers-software-repair/howland-releases
   (`app-builder-lib/out/targets/AppxTarget.js:46` `super("appx")`); there is no msix target and the
   Store accepts `.appx`.
 - **There is no Amazon flavor.** Amazon accepts a standard APK, so a second Amazon-named asset
-  would be a different name for identical bytes. One APK serves Amazon and sideload.
+  would be a different name for identical bytes. The one APK is Amazon's package.
 - **Building is never gated on signing** (owner, 2026-08-31). A leg builds regardless of
   certificates; only PUBLICATION is gated. Unsigned output uploads under an `unsigned-` artifact
   name that the release job's `take()` excludes by path. Android's unsigned form is a DEBUG-SIGNED

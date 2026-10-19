@@ -1,10 +1,14 @@
 name: Release Howland
 
-# ONE DISPATCH BUILDS EVERY HEAD THE RELEASE PAGE CARRIES. Desktop (six OS/arch legs) and Android
-# build from this one workflow and publish onto the SAME howland-v<version> release, the way
-# Magpie's release.yml does. Howland was split across separate desktop and mobile workflows; that
-# asymmetry is gone (owner ruling 2026-08-25). The server publishes onto the same release from the
-# howland repo — a different repo, so that stays its own workflow.
+# ONE DISPATCH BUILDS EVERY HEAD THE RELEASE PAGE CARRIES. Desktop (six OS/arch legs) builds from
+# this one workflow and publishes onto the SAME howland-v<version> release, the way Magpie's
+# release.yml does. The server publishes onto the same release from the howland repo — a different
+# repo, so that stays its own workflow.
+#
+# ANDROID BUILDS HERE AND NEVER REACHES THE PAGE. Phones install from stores only (owner ruling
+# D1625: nothing side-loads), so the signed .aab (Google Play) and .apk (Amazon Appstore) upload as
+# the store-android Actions artifact, the hand-off for store submission, and the release job does
+# not wait for them.
 #
 # iOS IS NOT HERE, and that is the same rule stated the other way round. The .ipa is not a release
 # asset — App Store Connect is its channel, and an .ipa on a release page installs for nobody — so
@@ -832,10 +836,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      # Uniform decide-and-record, identical in shape to the desktop legs and to Magpie's.
-      # No keystore means this leg publishes nothing and says which secret would change that;
-      # the run stays green and the release job renders the reason.
-      - name: Decide whether this leg can ship
+      # No keystore means no store packages: the leg builds the debug-signed twin only and says
+      # which secret would change that.
+      - name: Decide whether this leg can sign
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -844,9 +847,6 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           set -euo pipefail
-          # The checksum manifest rides with the binaries it describes: if they do not build,
-          # neither does it, for the same reason.
-          owed="Howland-Client-Android.apk Howland-Client-Android.aab Howland-Client-CHECKSUMS.txt"
           missing=""
           for v in ANDROID_KEYSTORE_BASE64 ANDROID_STORE_PASSWORD ANDROID_KEY_PASSWORD ANDROID_KEY_ALIAS; do
             eval "val=\${$v:-}"
@@ -854,23 +854,11 @@ jobs:
           done
           if [ -n "$missing" ]; then
             echo "CAN_SHIP=false" >> "$GITHUB_ENV"
-            mkdir -p skips
-            for asset in $owed; do
-              printf 'built UNSIGNED (debug-signed) and uploaded as an Actions artifact only: no %s\n' "$missing" > "skips/$asset.txt"
-            done
-            echo "Android builds unsigned and is not shipping to the page: no $missing"
+            echo "Android builds debug-signed only, no store packages: no $missing"
           else
             echo "CAN_SHIP=true" >> "$GITHUB_ENV"
             echo "Android signing secrets present."
           fi
-
-      - name: Upload skip records
-        if: ${{ env.CAN_SHIP != 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: skips-android
-          path: skips/*
-
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -1043,28 +1031,27 @@ jobs:
           # keystore was written into the working tree and left there.
           rm -f upload.keystore
 
-      - name: Stage Android artifacts (stable names)
+      - name: Stage Android store packages
         if: ${{ env.CAN_SHIP == 'true' }}
         run: |
-          mkdir -p mobile-artifacts
-          cp mobile/android/app/build/outputs/apk/release/app-release.apk mobile-artifacts/Howland-Client-Android.apk
-          cp mobile/android/app/build/outputs/bundle/release/app-release.aab mobile-artifacts/Howland-Client-Android.aab
-          ls -la mobile-artifacts
+          mkdir -p store-android
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk store-android/Howland-Client-Android.apk
+          cp mobile/android/app/build/outputs/bundle/release/app-release.aab store-android/Howland-Client-Android.aab
+          ls -la store-android
 
-      - name: Upload Android artifacts
+      - name: Upload Android store packages
         if: ${{ env.CAN_SHIP == 'true' }}
         uses: actions/upload-artifact@v7
         with:
-          name: mobile-android
+          name: store-android
           if-no-files-found: error
-          path: mobile-artifacts/*
+          path: store-android/*
 
       # BUILDING IS NEVER GATED ON SIGNING (owner law 2026-08-31): with no keystore the leg
       # still builds — as a DEBUG-SIGNED APK, because that is the only unsigned form a person
       # can actually install; an unsigned release APK/AAB is a file no device accepts, which
-      # is an artifact in name only. It uploads under an `unsigned-` artifact name, the
-      # directory the release job's take() excludes BY PATH, so it can never reach the page.
-      # The tester fetches it from the run; it reaches the release the day the keystore lands.
+      # is an artifact in name only. It uploads under an `unsigned-` artifact name for the
+      # owner's own testing and never reaches the page.
       - name: Build Android (unsigned, debug-signed APK)
         if: ${{ env.CAN_SHIP != 'true' }}
         working-directory: mobile/android
@@ -1095,10 +1082,10 @@ jobs:
     # howland's release job, server-release.yml, estate items 11/47). Without it, a preflight
     # that failed before running its `sel` step leaves the outputs below empty, EXPECTED narrows
     # to nothing, and the reconcile step below reports a false "Reconciled: 0 of 0" instead of
-    # stopping the run. preflight is added to `needs` here (not just via build-desktop and
-    # build-android) because a job can only read another job's `outputs` when it is a DIRECT
-    # need — transitive needs do not expose them.
-    needs: [preflight, build-desktop, build-android]
+    # stopping the run. preflight is added to `needs` here (not just via build-desktop) because a
+    # job can only read another job's `outputs` when it is a DIRECT need — transitive needs do not
+    # expose them.
+    needs: [preflight, build-desktop]
     if: ${{ always() && needs.preflight.result == 'success' && github.repository == 'ayers-software-repair/openwork' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1121,12 +1108,12 @@ jobs:
         with:
           path: artifacts
 
-      # THE EXPECTED LIST. Twenty assets: this workflow publishes desktop and mobile; the
-      # server's nine come from the howland repo onto the same release. An asset whose
-      # distribution channel is NOT the release page is deliberately absent from this list
-      # rather than being a permanent "not built" line — the iOS .ipa goes to App Store
-      # Connect. (Agreed with magpie-go-live; their Roku and watch-web zips are excluded by
-      # the same rule.)
+      # THE EXPECTED LIST. Seventeen assets: this workflow publishes desktop; the server's nine
+      # come from the howland repo onto the same release. An asset whose distribution channel is
+      # NOT the release page is deliberately absent from this list rather than being a permanent
+      # "not built" line — the iOS .ipa goes to App Store Connect, the Android packages to Google
+      # Play and the Amazon Appstore. (Agreed with magpie-go-live; their Roku and watch-web zips
+      # are excluded by the same rule.)
       - name: Collect what was built
         run: |
           set -euo pipefail
@@ -1162,9 +1149,6 @@ jobs:
           take '*linux-amd64*.deb'       Howland-Desktop-Linux-x64.deb
           take '*linux-arm64*.AppImage'  Howland-Desktop-Linux-arm64.AppImage
           take '*linux-arm64*.deb'       Howland-Desktop-Linux-arm64.deb
-          # Mobile artifacts are already stable-named by their leg.
-          take 'Howland-Client-Android.apk' Howland-Client-Android.apk
-          take 'Howland-Client-Android.aab' Howland-Client-Android.aab
           # Updater metadata: each leg emits exactly one, uniquely named.
           find artifacts -name 'latest*.yml' -not -path 'artifacts/unsigned-*' -exec cp {} release/ \; 2>/dev/null || true
           echo "Collected:"; ls -la release
@@ -1178,9 +1162,7 @@ jobs:
       # published manifest with one describing only this run's platforms, and every user
       # verifying an untouched, perfectly valid asset would be told it is not in the manifest.
       # Worse: the assets this run DID replace keep their old hashes in the published manifest,
-      # so verifying those FAILS until a full run re-publishes it. The summary says so. The
-      # ANDROID manifest describes only the two Android files, both rebuilt whenever Android is
-      # selected at all, so it regenerates safely on any run that includes Android.
+      # so verifying those FAILS until a full run re-publishes it. The summary says so.
       - name: Checksum what shipped
         env:
           # Resolved once in preflight's `sel` step — see the input-block comment above.
@@ -1198,8 +1180,6 @@ jobs:
             if [ "$FULL_DESKTOP" = "true" ] && [ -n "$desktop" ]; then
               sha256sum $desktop > Howland-Desktop-CHECKSUMS.txt
             fi
-            client=$(ls Howland-Client-Android.* 2>/dev/null || true)
-            if [ -n "$client" ]; then sha256sum $client > Howland-Client-CHECKSUMS.txt; fi
           }
           ls -la
 
@@ -1250,16 +1230,14 @@ jobs:
       #
       # The expected list NARROWS with the heads_ selection — a deselected platform was never
       # going to build, which is a different fact from both of the above and gets NO line and
-      # NO skip record (agreed with magpie). The manifests are release-level artifacts: the
-      # desktop manifest is expected only on a full desktop selection (see the checksum step),
-      # the Android manifest whenever Android is selected.
+      # NO skip record (agreed with magpie). The desktop manifest is a release-level artifact,
+      # expected only on a full desktop selection (see the checksum step).
       - name: Reconcile against the expected assets
         env:
           # Resolved once in preflight's `sel` step — see the input-block comment above.
           SEL_MACOS: ${{ needs.preflight.outputs.macos }}
           SEL_WINDOWS: ${{ needs.preflight.outputs.windows }}
           SEL_LINUX: ${{ needs.preflight.outputs.linux }}
-          SEL_ANDROID: ${{ needs.preflight.outputs.android }}
         run: |
           set -euo pipefail
           EXPECTED=""
@@ -1281,9 +1259,6 @@ jobs:
           if [ "$SEL_MACOS" = "true" ] && [ "$SEL_WINDOWS" = "true" ] && [ "$SEL_LINUX" = "true" ]; then
             EXPECTED="$EXPECTED Howland-Desktop-CHECKSUMS.txt"
           fi
-          if [ "$SEL_ANDROID" = "true" ]; then
-            EXPECTED="$EXPECTED Howland-Client-Android.apk Howland-Client-Android.aab Howland-Client-CHECKSUMS.txt"
-          else deselected="$deselected Android"; fi
 
           # Always exits 0: under `set -e` a function ending in a false test would abort the
           # step on the ORDINARY case of an asset with no skip record.
@@ -1389,7 +1364,7 @@ jobs:
           # a second release tag on howland-releases — that would become "latest" and 404
           # every family's /releases/latest/download/<name> link (ONE RELEASE TRAIN).
           tag_name: howland-v${{ steps.v.outputs.version }}
-          # All families (desktop, mobile, server) share ONE release per version; the title is the
+          # Both families (desktop, server) share ONE release per version; the title is the
           # plain product+version so whichever workflow publishes last leaves the same name.
           name: Howland ${{ steps.v.outputs.version }}
           body_path: RELEASE_NOTES.md

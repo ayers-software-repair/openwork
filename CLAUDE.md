@@ -1,8 +1,9 @@
 # CLAUDE.md — the Howland desktop/mobile fork
 
 This is `different-ai/openwork` forked (`upstream` remote), and the branch that matters is
-**`howland`** — the fork's default. It builds Howland's desktop (six OS/arch legs) and Android
-heads onto the one `howland-v1.0.0` release of `ayers-software-repair/howland-releases`.
+**`howland`** — the fork's default. It builds Howland's desktop (six OS/arch legs) onto the one
+`howland-v1.0.0` release of `ayers-software-repair/howland-releases`, and the Android store
+packages as an Actions artifact (phones install from stores only, D1625).
 
 Read `WORKING.md` here for this fork's current state; the governing queue, standing rulings and
 cross-repo record live in **`../howland/WORKING.md`** (the howland maintainer session and the

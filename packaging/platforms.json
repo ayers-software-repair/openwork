@@ -15,7 +15,9 @@
     "           regardless of certificates and upload under an `unsigned-` artifact name the",
     "           release job's take() excludes BY PATH (owner ruling 2026-08-31: building and",
     "           publishing are different acts and only the second is gated).",
-    "  store    App Store Connect, never a release page and never an Actions-artifact substitute.",
+    "  store    App Store Connect, Google Play, the Amazon Appstore or the Microsoft Store, never a",
+    "           release page. Phones install from stores only (owner ruling D1625: nothing",
+    "           side-loads); the package rides to submission as an Actions artifact.",
     "The iOS .ipa is `published: false` for a CATEGORICALLY DIFFERENT REASON than an unsigned",
     "desktop leg: the leg is waiting for a certificate, the .ipa is refused the page by policy",
     "forever. Collapsed into one state, someone eventually 'fixes' the .ipa onto the page.",
@@ -169,25 +171,17 @@
       "name": "Howland-Client-Android.apk",
       "platform": "android",
       "arch": "any",
-      "channel": "release",
+      "channel": "store",
       "published": false,
-      "why": "no ANDROID_KEYSTORE_BASE64 / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD / ANDROID_STORE_PASSWORD. Sideload is a real channel for an offline-first product, so this publishes the day the keystore lands. THIS ONE FILE IS ALSO THE AMAZON APPSTORE ARTIFACT -- Amazon accepts a standard APK, so a second Amazon-named asset would declare a different name for identical bytes. magpie states the same thing at release.yml:273, 'AAB (Play) + APK (Amazon + sideload)', and the uniformity law is the reason to say it the same way rather than invent a flavour here."
+      "why": "NEVER a release asset, by policy: phones install from stores only (owner ruling D1625). The Amazon Appstore package -- Amazon takes a standard APK. Signed with the upload keystore; with no ANDROID_KEYSTORE_BASE64 / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD / ANDROID_STORE_PASSWORD the leg builds only the debug twin."
     },
     {
       "name": "Howland-Client-Android.aab",
       "platform": "android",
       "arch": "any",
-      "channel": "release",
+      "channel": "store",
       "published": false,
-      "why": "the Play store-submission artifact; gated by the same keystore as the .apk."
-    },
-    {
-      "name": "Howland-Client-CHECKSUMS.txt",
-      "platform": "any",
-      "arch": "any",
-      "channel": "release",
-      "published": false,
-      "why": "the checksum manifest rides with the binaries it describes: if they do not publish, neither does it, for the same reason."
+      "why": "NEVER a release asset, by policy. The Google Play package; gated by the same keystore as the .apk."
     },
     {
       "name": "Howland-Client-Android-debug.apk",

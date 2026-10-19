@@ -136,7 +136,7 @@ const DESKTOP_DISTRIBUTION = resolveDesktopDistribution({
 // The identifier must match the release's -c.appId: NSIS stamps shortcuts with it and
 // Squirrel.Mac derives its ShipIt domain from it.
 const HOWLAND_APP_NAME = "Howland";
-const HOWLAND_APP_IDENTIFIER = "com.howland.app";
+const HOWLAND_APP_IDENTIFIER = "repair.ayers.howland";
 // Registered beside openwork:// and normalized to it before the renderer sees a link.
 const HOWLAND_PROTOCOL_SCHEME = "howland";
 const DEV_APP_IDENTIFIER = `${DESKTOP_DISTRIBUTION.appIdentifier}.dev`;

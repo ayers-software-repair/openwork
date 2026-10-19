@@ -618,9 +618,9 @@ jobs:
           # ${os}, ${arch}, ${version} and ${ext} are electron-builder macros, not shell variables.
           # shellcheck disable=SC2016
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
-            -c.productName=Howland -c.appId=com.howland.app \
+            -c.productName=Howland -c.appId=repair.ayers.howland \
             -c.extraMetadata.version="$VERSION" \
-            -c.extraMetadata.desktopName=com.howland.app \
+            -c.extraMetadata.desktopName=repair.ayers.howland \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
             -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
             -c.extraMetadata.license="MIT" \

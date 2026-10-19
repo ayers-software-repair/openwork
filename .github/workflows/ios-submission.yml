@@ -263,7 +263,7 @@ jobs:
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
             archive \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-            PRODUCT_BUNDLE_IDENTIFIER=com.howland.app \
+            PRODUCT_BUNDLE_IDENTIFIER=repair.ayers.howland \
             MARKETING_VERSION="$STAMP_VERSION" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
             CODE_SIGN_STYLE=Manual \
@@ -292,7 +292,7 @@ jobs:
             <string>Apple Distribution</string>
             <key>provisioningProfiles</key>
             <dict>
-              <key>com.howland.app</key>
+              <key>repair.ayers.howland</key>
               <string>${PROFILE_NAME}</string>
             </dict>
             <key>uploadBitcode</key>
@@ -361,7 +361,7 @@ jobs:
             echo "| Artifact | \`Howland-Client-iOS-arm64.ipa\` ($SIZE) |"
             echo "| Version | $STAMP_VERSION |"
             echo "| Build number | ${{ github.run_number }} |"
-            echo "| Bundle id | com.howland.app |"
+            echo "| Bundle id | repair.ayers.howland |"
             echo
             echo "Download it from the **Artifacts** section of this run page, then upload it to"
             echo "App Store Connect (Transporter, or Xcode's Organizer)."

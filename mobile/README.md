@@ -19,7 +19,7 @@ the web app, connecting to a Howland server) has not been validated on a device.
 
 ## What is here
 
-- `capacitor.config.ts` — appId `com.howland.app`, appName `Howland`, `webDir: dist`, and a
+- `capacitor.config.ts` — appId `repair.ayers.howland`, appName `Howland`, `webDir: dist`, and a
   `server` block that lets the app reach a user-set Howland server (see below).
 - `package.json` — `@capacitor/core` + `@capacitor/cli` + `@capacitor/ios` + `@capacitor/android`.
 - `.gitignore` — ignores the generated `android/`/`ios/` projects, `node_modules/`, the
@@ -88,7 +88,7 @@ Android: `ANDROID_KEYSTORE_BASE64` (base64 of the upload keystore), `ANDROID_KEY
 `ANDROID_KEY_PASSWORD`, `ANDROID_STORE_PASSWORD`.
 
 iOS: `APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`, `APPLE_TEAM_ID`,
-`APPLE_PROVISIONING_PROFILE_BASE64` (bundle id `com.howland.app`; the profile NAME is derived
+`APPLE_PROVISIONING_PROFILE_BASE64` (bundle id `repair.ayers.howland`; the profile NAME is derived
 from the file — no separate name secret).
 
 Publishing (shared with the desktop legs): `RELEASES_PAT`, `contents:write` on

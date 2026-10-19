@@ -28,7 +28,7 @@ const allowNavigation = (process.env.HOWLAND_ALLOWED_HOSTS ?? "")
   .filter(Boolean);
 
 const config: CapacitorConfig = {
-  appId: "com.howland.app",
+  appId: "repair.ayers.howland",
   appName: "Howland",
   webDir: "dist",
   server: {

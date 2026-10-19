@@ -30,7 +30,7 @@ Hard rules:
   page / Actions artifact / store), and `packaging/platforms.test.mjs` holds both workflows to
   it in both directions — `node --test packaging/platforms.test.mjs`, no pnpm install. Any
   asset rename or new leg lands in the same change as its row, and reddens
-  `../howland/installer/release_assets_test.go`'s 26-asset count, which is the only cross-repo
+  `../howland/installer/release_assets_test.go`'s 28-asset count, which is the only cross-repo
   tripwire there is.
 - Nothing publishes, tags, or dispatches without explicit owner go-ahead. Version locked at
   1.0.0, overwritten in place. No emojis; no AI attribution in commits; commit identity per

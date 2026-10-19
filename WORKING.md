@@ -20,7 +20,9 @@ from stores only and nothing side-loads (owner, D1625).
 - **`release.yml`** — the desktop+Android release. Preflight (sidecar release exists with all
   six asset names AND was built from the commit `constants.json` pins as `opencodeCommit`;
   RELEASES_PAT has WRITE on howland-releases) -> build-desktop (matrix COMPUTED from the
-  `heads_*` selection) + build-android -> release (collect, checksum-what-shipped, updater
+  `heads_*` selection; Windows produces native unpacked apps) -> package-windows (one x64 host
+  signs both architectures' fork-owned payloads, wraps NSIS/AppX, signs NSIS and refreshes updater
+  metadata) + build-android -> release (collect, checksum-what-shipped, updater
   metadata must name shipping files, reconcile, publish, then chain-dispatch howland's server
   release forwarding the selection). Publish-what-signs: a leg without its secrets skips with
   a skip record; reconcile turns records into named "Not built" summary lines and hard-fails
@@ -41,11 +43,12 @@ from stores only and nothing side-loads (owner, D1625).
 - The sidecar fetch (`apps/desktop/scripts/prepare-sidecar.mjs`) exits 1 on a missing asset —
   why the sidecar release must exist first, and why the chain's first link cuts it.
 - Version is stamped from the tag via extraMetadata (locked 1.0.0 fallback on any
-  non-semver). Each leg rewrites its updater metadata to the stable asset names (bytes
-  identical, so sha512/size hold) and renames it to its per-platform+arch channel file;
+  non-semver). Each non-Windows leg rewrites its updater metadata to stable asset names. Windows
+  signs the stable NSIS installer, then regenerates its matching `.exe.blockmap` and feed SHA-512
+  and size from those final bytes;
   `howlandUpdaterChannel()` in updater.mjs pins the channel explicitly because
   electron-updater's filename heuristics would hand an arm64 Mac the Intel zip. Update
-  payloads are the same stable assets; differential downloads stay disabled (no blockmaps).
+  payloads are the same stable assets; Windows publishes architecture-specific blockmaps.
 - Android: network_security_config.xml scopes cleartext for self-hosted LAN servers (Android
   has no CIDR syntax — confirmed platform limitation); versionCode = run number because
   store build codes must increase across the 1.0.0-in-place loop.
@@ -62,9 +65,13 @@ from stores only and nothing side-loads (owner, D1625).
 - **There is no Amazon flavor.** Amazon accepts a standard APK, so a second Amazon-named asset
   would be a different name for identical bytes. The one APK is Amazon's package.
 - **Building is never gated on signing** (owner, 2026-08-31). A leg builds regardless of
-  certificates; only PUBLICATION is gated. Unsigned output uploads under an `unsigned-` artifact
-  name that the release job's `take()` excludes by path. Android's unsigned form is a DEBUG-SIGNED
-  APK, because an unsigned release APK is a file no device installs — an artifact in name only.
+  certificates; only PUBLICATION is gated. Windows treats all six Azure identity/configuration
+  values absent as unsigned and rejects a partial set before packaging. A fully configured signing
+  run also needs OpenWork's `PLATFORM_READ_KEY`, the private half of a read-only deploy key for the
+  private platform repository; the unsigned path does not check out platform or require that key.
+  Unsigned output uploads under an `unsigned-` artifact name that the release job's `take()`
+  excludes by path. Android's unsigned form is a DEBUG-SIGNED APK, because an unsigned release APK
+  is a file no device installs — an artifact in name only.
 
 ## Open here
 

@@ -29,11 +29,11 @@
     "on no device and a debug-signed one does.",
     "",
     "THE MIRROR THIS DOES NOT CLOSE. ../howland/installer/release_assets_test.go carries",
-    "desktopReleaseAssets -- a hand-kept 17-name copy of the list below, with 'UPDATE THIS LIST IN",
+    "desktopReleaseAssets -- a hand-kept 19-name copy of the list below, with 'UPDATE THIS LIST IN",
     "THE SAME CHANGE', in the same file that rules a declaration nothing enforces goes stale. CI",
     "cannot read a sibling repo, so neither side can parse the other. It is named here so the next",
     "reader finds the mirror instead of discovering it. Its TestPublishedAssetTrainIsComplete",
-    "asserts 26 = 17 desktop + 9 server, so ANY name added to the train below reddens howland's",
+    "asserts 28 = 19 desktop + 9 server, so ANY name added to the train below reddens howland's",
     "count test -- which makes that count an indirect cross-repo tripwire, and it is the only one",
     "there is."
   ],
@@ -141,7 +141,15 @@
       "arch": "x64",
       "channel": "release",
       "published": false,
-      "why": "unsigned: no WINDOWS_CERT_PFX_BASE64. Builds every run and uploads as unsigned-<leg>; SmartScreen warns on reputation, which an unsigned binary can never accrue."
+      "why": "unsigned: no complete Azure Artifact Signing configuration. The native app transfers to the x64 packaging job and uploads as unsigned-windows; SmartScreen reputation requires a verified signed public binary."
+    },
+    {
+      "name": "Howland-Desktop-Windows-x64.exe.blockmap",
+      "platform": "windows",
+      "arch": "x64",
+      "channel": "release",
+      "published": false,
+      "why": "the differential-update map is regenerated from the final signed installer and rides with that installer only after its signature verifies."
     },
     {
       "name": "Howland-Desktop-Windows-arm64.exe",
@@ -149,7 +157,15 @@
       "arch": "arm64",
       "channel": "release",
       "published": false,
-      "why": "unsigned: no WINDOWS_CERT_PFX_BASE64. Builds every run and uploads as unsigned-<leg>."
+      "why": "unsigned: no complete Azure Artifact Signing configuration. The native arm64 app transfers to the supported x64 packaging job and uploads as unsigned-windows-arm64."
+    },
+    {
+      "name": "Howland-Desktop-Windows-arm64.exe.blockmap",
+      "platform": "windows",
+      "arch": "arm64",
+      "channel": "release",
+      "published": false,
+      "why": "the differential-update map is regenerated from the final signed installer and rides with that installer only after its signature verifies."
     },
     {
       "name": "latest.yml",

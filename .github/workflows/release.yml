@@ -324,7 +324,6 @@ jobs:
     env:
       MAC_SIGN: ${{ secrets.APPLE_DESKTOP_CERT_P12_BASE64 != '' }}
       MAC_NOTARIZE: ${{ secrets.APPLE_DESKTOP_CERT_P12_BASE64 != '' && secrets.APPLE_NOTARY_KEY_P8 != '' }}
-      WIN_SIGN: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' }}
 
     steps:
       - name: Checkout
@@ -349,10 +348,10 @@ jobs:
               owed="Howland-Desktop-macOS-arm64.dmg Howland-Desktop-macOS-arm64.zip latest-mac.yml" ;;
             macos-intel)
               owed="Howland-Desktop-macOS-x64.dmg Howland-Desktop-macOS-x64.zip latest-x64-mac.yml" ;;
-            windows)
-              owed="Howland-Desktop-Windows-x64.exe latest.yml" ;;
-            windows-arm64)
-              owed="Howland-Desktop-Windows-arm64.exe latest-arm64.yml" ;;
+            windows|windows-arm64)
+              echo "CAN_SHIP=transfer" >> "$GITHUB_ENV"
+              echo "This native Windows leg hands its unpacked app to the x64 signing and packaging job."
+              exit 0 ;;
             linux)
               owed="Howland-Desktop-Linux-x64.AppImage Howland-Desktop-Linux-x64.deb latest-linux.yml" ;;
             linux-arm64)
@@ -364,10 +363,6 @@ jobs:
                 can=false; reason="no APPLE_DESKTOP_CERT_P12_BASE64, so the macOS legs did not build"
               elif [ "$MAC_NOTARIZE" != "true" ]; then
                 can=false; reason="no APPLE_NOTARY_KEY_P8, so the macOS legs did not build"
-              fi ;;
-            windows|windows-arm64)
-              if [ "$WIN_SIGN" != "true" ]; then
-                can=false; reason="no WINDOWS_CERT_PFX_BASE64, so the Windows legs did not build"
               fi ;;
           esac
           # CAN_SHIP means RELEASE-ELIGIBLE, not buildable. The leg BUILDS either way (owner
@@ -392,7 +387,7 @@ jobs:
           fi
 
       - name: Upload skip records
-        if: ${{ env.CAN_SHIP != 'true' }}
+        if: ${{ env.CAN_SHIP == 'false' }}
         uses: actions/upload-artifact@v7
         with:
           name: skips-${{ matrix.artifact }}
@@ -619,6 +614,7 @@ jobs:
           # upstream's file even though it opens Howland.
           TARGETS=()
           if [ "$RUNNER_OS" = "Linux" ]; then TARGETS=(--linux AppImage deb); fi
+          if [ "$RUNNER_OS" = "Windows" ]; then TARGETS=(--dir); fi
           # ${os}, ${arch}, ${version} and ${ext} are electron-builder macros, not shell variables.
           # shellcheck disable=SC2016
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
@@ -637,39 +633,6 @@ jobs:
             ${TARGETS[@]+"${TARGETS[@]}"} \
             --publish never
 
-      # --- Windows Authenticode (soft-fail, isolated + swappable) ---------------------------
-      # Signs the final NSIS installer with signtool — same mechanism, secret names and
-      # env-boolean gate as the howland repo's server-release.yml "Sign the .exe" step. Runs
-      # on both windows legs; skips cleanly when WINDOWS_CERT_PFX_BASE64 is absent.
-      #
-      # >>> SWAP POINT (Azure Trusted Signing) <<<
-      # File-based PFX certs are no longer purchasable (see the private build-farm repo,
-      # signing/READINESS.md); when
-      # Azure Trusted Signing is provisioned, replace ONLY this step with
-      # azure/trusted-signing-action (files-folder: apps/desktop/dist-electron, filter *.exe)
-      # and redefine WIN_SIGN at the job level to test the Azure secrets instead
-      # (e.g. secrets.AZURE_TENANT_ID != ''). Nothing else moves: SHA256SUMS-desktop.txt is
-      # computed in the release job AFTER this, so checksums always cover the signed bytes.
-      - name: Sign the Windows installer (Authenticode)
-        if: ${{ env.CAN_SHIP == 'true' && runner.os == 'Windows' }}
-        shell: pwsh
-        env:
-          PFX_B64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
-          PFX_PWD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-        run: |
-          $pfx = Join-Path $env:RUNNER_TEMP "howland-codesign.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
-          $archDir = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
-          $signtool = (Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin" -Recurse -Filter signtool.exe |
-            Where-Object { $_.FullName -match $archDir } | Select-Object -First 1).FullName
-          if (-not $signtool) { throw "signtool.exe for $archDir not found under Windows Kits - the runner image changed" }
-          foreach ($exe in (Get-ChildItem "apps/desktop/dist-electron" -Filter *.exe)) {
-            & $signtool sign /f $pfx /p $env:PFX_PWD /fd SHA256 `
-              /tr http://timestamp.digicert.com /td SHA256 /d "Howland" $exe.FullName
-            if ($LASTEXITCODE -ne 0) { throw "signtool failed for $($exe.Name)" }
-          }
-          Remove-Item $pfx
-
       # OWNER RULING 2026-08-24: auto-update ships in 1.0. electron-builder emits updater
       # metadata even under --publish never; its file entries reference the VERSIONED
       # artifact names, while the release serves STABLE names — same bytes, renamed, so the
@@ -677,6 +640,7 @@ jobs:
       # renames its metadata to the per-platform+arch channel file the app requests
       # (howlandManifestChannel in electron/howland-release.mjs — the two lists must match).
       - name: Stable-name the updater metadata
+        if: ${{ !startsWith(matrix.artifact, 'windows') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -754,34 +718,8 @@ jobs:
           fi
           echo "copyright present at $f, carries both MIT notices, licences packed, and /opt is clean"
 
-      # THE STORE PACKAGE GETS ITS STABLE NAME IN THE LEG, not in the release job's take().
-      # take() renames on the way to the RELEASE DIRECTORY and .appx never goes there, so an appx
-      # left with electron-builder's own artifactName (openwork-win-x64-<version>.appx) would
-      # reach a tester under a name the grammar does not know and the declaration cannot bind.
-      # Renaming here is what lets packaging/platforms.json name it at all.
-      - name: Name the Windows Store package
-        if: ${{ startsWith(matrix.artifact, 'windows') }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd apps/desktop/dist-electron
-          case "${{ matrix.artifact }}" in
-            windows)       want=Howland-Desktop-Windows-x64.appx ;;
-            windows-arm64) want=Howland-Desktop-Windows-arm64.appx ;;
-          esac
-          # A glob array, not `ls | head`: under pipefail a failed ls exits here, before the error below.
-          shopt -s nullglob
-          appx=(./*.appx)
-          src=${appx[0]:-}
-          src=${src#./}
-          # An absent appx is a BUILD failure, not a naming one: the target is declared
-          # unconditionally, so nothing legitimately produces zero of them.
-          test -n "$src" || { echo "::error::appx target produced nothing"; exit 1; }
-          [ "$src" = "$want" ] || mv "$src" "$want"
-          ls -la "$want"
-
       - name: Upload installers
-        if: ${{ env.CAN_SHIP == 'true' }}
+        if: ${{ env.CAN_SHIP == 'true' && !startsWith(matrix.artifact, 'windows') }}
         uses: actions/upload-artifact@v7
         with:
           name: howland-${{ matrix.artifact }}
@@ -808,7 +746,7 @@ jobs:
       # absent-with-a-skip-record, and if the artifact and the release ever agree, that is the
       # defect.
       - name: Upload UNSIGNED installers (Actions artifact only, never released)
-        if: ${{ env.CAN_SHIP != 'true' }}
+        if: ${{ env.CAN_SHIP == 'false' }}
         uses: actions/upload-artifact@v7
         with:
           name: unsigned-${{ matrix.artifact }}
@@ -822,6 +760,265 @@ jobs:
             # STORE CHANNEL, same as the signed path: never released either way.
             apps/desktop/dist-electron/*.appx
             apps/desktop/dist-electron/latest*.yml
+
+      - name: Stage the native Windows app for x64 signing and packaging
+        if: ${{ startsWith(matrix.artifact, 'windows') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.artifact }}" in
+            windows)       src=apps/desktop/dist-electron/win-unpacked ;;
+            windows-arm64) src=apps/desktop/dist-electron/win-arm64-unpacked ;;
+          esac
+          test -f "$src/Howland.exe" || { echo "::error::$src/Howland.exe is missing"; exit 1; }
+          rm -rf windows-unpacked
+          mkdir windows-unpacked
+          cp -R "$src"/. windows-unpacked/
+
+      - name: Upload the native unpacked Windows app
+        if: ${{ startsWith(matrix.artifact, 'windows') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: unpacked-${{ matrix.artifact }}
+          if-no-files-found: error
+          path: windows-unpacked
+
+  package-windows:
+    needs: [preflight, build-desktop]
+    if: >-
+      github.repository == 'ayers-software-repair/openwork' &&
+      needs.preflight.outputs.windows == 'true' &&
+      needs.build-desktop.result == 'success'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - artifact: windows
+            arch: x64
+            sidecar: opencode-x86_64-pc-windows-msvc.exe
+            installer: Howland-Desktop-Windows-x64.exe
+            blockmap: Howland-Desktop-Windows-x64.exe.blockmap
+            manifest: latest.yml
+            appx: Howland-Desktop-Windows-x64.appx
+          - artifact: windows-arm64
+            arch: arm64
+            sidecar: opencode-aarch64-pc-windows-msvc.exe
+            installer: Howland-Desktop-Windows-arm64.exe
+            blockmap: Howland-Desktop-Windows-arm64.exe.blockmap
+            manifest: latest-arm64.yml
+            appx: Howland-Desktop-Windows-arm64.appx
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+      AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+      AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+      ANY_SIGN: ${{ secrets.AZURE_CLIENT_ID != '' || secrets.AZURE_TENANT_ID != '' || secrets.AZURE_SUBSCRIPTION_ID != '' || vars.AZURE_SIGNING_ENDPOINT != '' || vars.AZURE_SIGNING_ACCOUNT != '' || vars.AZURE_SIGNING_PROFILE != '' }}
+      SIGN: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' && vars.AZURE_SIGNING_ENDPOINT != '' && vars.AZURE_SIGNING_ACCOUNT != '' && vars.AZURE_SIGNING_PROFILE != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The shared validator remains authoritative for a configured signing run. This small
+      # boundary guard runs first because OpenWork is public while platform is private: a partial
+      # Azure setup must fail clearly without needing the private action checkout, while a wholly
+      # absent setup must remain a working unsigned build.
+      - name: Reject partial Windows signing configuration before private checkout
+        if: ${{ env.ANY_SIGN == 'true' && env.SIGN != 'true' }}
+        shell: bash
+        run: |
+          echo "::error::all six Azure signing values must be configured together: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_SIGNING_ENDPOINT, AZURE_SIGNING_ACCOUNT, AZURE_SIGNING_PROFILE"
+          exit 1
+
+      # Both local action calls execute from one pinned platform checkout, keeping validation and
+      # signing on the same published contract across both architecture legs.
+      # The signed path needs a read-only deploy key for the private platform repository stored
+      # in OpenWork as PLATFORM_READ_KEY. An unsigned run never reads that key or repository.
+      - name: Check out the shared Windows signer
+        if: ${{ env.SIGN == 'true' }}
+        uses: actions/checkout@v7
+        with:
+          repository: ayers-software-repair/platform
+          ref: v0.69.0
+          ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
+          persist-credentials: false
+          path: _platform
+          sparse-checkout: |
+            codestyle/ci/actions/windows-sign/
+            codestyle/ci/actions/windows-signing-check/
+
+      - name: Reject incomplete Windows signing configuration
+        if: ${{ env.SIGN == 'true' }}
+        uses: ./_platform/codestyle/ci/actions/windows-signing-check
+
+      - name: Download the native unpacked app
+        uses: actions/download-artifact@v8
+        with:
+          name: unpacked-${{ matrix.artifact }}
+          path: windows-unpacked
+
+      - name: Record whether this package can publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$SIGN" = "true" ]; then
+            echo "This x64 job will sign and package the ${{ matrix.arch }} app."
+            exit 0
+          fi
+          reason="no complete Azure Artifact Signing configuration, so the Windows ${{ matrix.arch }} package stays private"
+          mkdir -p skips
+          for asset in "${{ matrix.installer }}" "${{ matrix.blockmap }}" "${{ matrix.manifest }}"; do
+            printf '%s\n' "$reason" > "skips/$asset.txt"
+          done
+
+      - name: Upload skip records
+        if: ${{ env.SIGN != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: skips-${{ matrix.artifact }}
+          if-no-files-found: error
+          path: skips/*
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.4.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install packaging dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test final Windows updater artifact refresh
+        run: node scripts/release/refresh-signed-windows-artifacts.test.mjs
+
+      # Only the fork-owned app and sidecars are declared. Electron/Chromium and native modules
+      # keep their vendor signatures; a recursive *.exe signing glob would overwrite them.
+      - name: Sign and verify the unpacked app and sidecars
+        id: sign-payload
+        if: ${{ env.SIGN == 'true' }}
+        uses: ./_platform/codestyle/ci/actions/windows-sign
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          description: Howland
+          files: |
+            ${{ github.workspace }}/windows-unpacked/Howland.exe
+            ${{ github.workspace }}/windows-unpacked/resources/sidecars/opencode.exe
+            ${{ github.workspace }}/windows-unpacked/resources/sidecars/${{ matrix.sidecar }}
+
+      # electron-builder's documented --prepackaged path wraps the already-signed native app.
+      # Its own signing is disabled so the shared action remains the single signing mechanism.
+      # The AppX outer package stays unsigned for Microsoft Store re-signing under its assigned
+      # Partner Center identity; Azure Artifact Signing does not replace that identity.
+      - name: Package NSIS and the Store-only AppX from the signed app
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-(mobile-)?)?v?//')
+          case "$VERSION" in
+            *[!0-9.]*|"") VERSION=1.0.0 ;;
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) VERSION=1.0.0 ;;
+          esac
+          # electron-builder, not Bash, expands the literal ${os}, ${arch}, ${version} and ${ext} macros.
+          # shellcheck disable=SC2016
+          pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
+            --prepackaged "$GITHUB_WORKSPACE/windows-unpacked" --win nsis appx --${{ matrix.arch }} \
+            -c.productName=Howland -c.appId=repair.ayers.howland \
+            -c.extraMetadata.version="$VERSION" \
+            -c.extraMetadata.desktopName=repair.ayers.howland \
+            '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
+            -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
+            -c.extraMetadata.license="MIT" \
+            -c.copyright="Copyright (c) 2026 Different AI. Howland additions Copyright Ayers Electronics Inc. MIT License." \
+            -c.win.signExecutable=false \
+            --publish never
+
+      - name: Give the Windows artifacts their stable names
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd apps/desktop/dist-electron
+          shopt -s nullglob
+          installers=(howland-win-${{ matrix.arch }}-*.exe)
+          appx=(howland-win-${{ matrix.arch }}-*.appx)
+          [ "${#installers[@]}" -eq 1 ] || { echo "::error::expected one NSIS installer, found ${#installers[@]}"; exit 1; }
+          [ "${#appx[@]}" -eq 1 ] || { echo "::error::expected one AppX package, found ${#appx[@]}"; exit 1; }
+          mv "${installers[0]}" "${{ matrix.installer }}"
+          mv "${appx[0]}" "${{ matrix.appx }}"
+          rm -f howland-win-${{ matrix.arch }}-*.exe.blockmap
+          test -f latest.yml || { echo "::error::latest.yml was not emitted"; exit 1; }
+          if [ "${{ matrix.manifest }}" != latest.yml ]; then mv latest.yml "${{ matrix.manifest }}"; fi
+
+      - name: Sign and verify the final NSIS installer
+        id: sign-installer
+        if: ${{ env.SIGN == 'true' }}
+        uses: ./_platform/codestyle/ci/actions/windows-sign
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          description: Howland
+          files: ${{ github.workspace }}/apps/desktop/dist-electron/${{ matrix.installer }}
+
+      - name: The shared signer verified every declared Windows file
+        if: ${{ env.SIGN == 'true' }}
+        shell: bash
+        env:
+          PAYLOAD_SIGNED: ${{ steps.sign-payload.outputs.signed }}
+          INSTALLER_SIGNED: ${{ steps.sign-installer.outputs.signed }}
+        run: |
+          if [ "$PAYLOAD_SIGNED" != true ] || [ "$INSTALLER_SIGNED" != true ]; then
+            echo "::error::the shared signer did not verify every declared Windows file"
+            exit 1
+          fi
+
+      # Signing mutates the installer. Rebuild its blockmap and feed SHA-512/size only after
+      # those final bytes exist; the helper also rewrites the feed URL to the stable asset name.
+      - name: Refresh the final Windows updater artifacts
+        run: node scripts/release/refresh-signed-windows-artifacts.mjs apps/desktop/dist-electron 1
+
+      - name: Upload signed Windows installers
+        if: ${{ env.SIGN == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: howland-${{ matrix.artifact }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/dist-electron/${{ matrix.installer }}
+            apps/desktop/dist-electron/${{ matrix.blockmap }}
+            apps/desktop/dist-electron/${{ matrix.manifest }}
+            apps/desktop/dist-electron/${{ matrix.appx }}
+
+      - name: Upload unsigned Windows installers (private artifact only)
+        if: ${{ env.SIGN != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-${{ matrix.artifact }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/dist-electron/${{ matrix.installer }}
+            apps/desktop/dist-electron/${{ matrix.blockmap }}
+            apps/desktop/dist-electron/${{ matrix.manifest }}
+            apps/desktop/dist-electron/${{ matrix.appx }}
 
   build-android:
     needs: preflight
@@ -1085,8 +1282,12 @@ jobs:
     # stopping the run. preflight is added to `needs` here (not just via build-desktop) because a
     # job can only read another job's `outputs` when it is a DIRECT need — transitive needs do not
     # expose them.
-    needs: [preflight, build-desktop]
-    if: ${{ always() && needs.preflight.result == 'success' && github.repository == 'ayers-software-repair/openwork' }}
+    needs: [preflight, build-desktop, package-windows]
+    if: >-
+      always() &&
+      needs.preflight.result == 'success' &&
+      (needs.preflight.outputs.windows != 'true' || needs.package-windows.result == 'success') &&
+      github.repository == 'ayers-software-repair/openwork'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # ONE RELEASE TRAIN guard. The original reason (a separate mobile workflow racing this one
@@ -1108,7 +1309,7 @@ jobs:
         with:
           path: artifacts
 
-      # THE EXPECTED LIST. Seventeen assets: this workflow publishes desktop; the server's nine
+      # THE EXPECTED LIST. Nineteen assets: this workflow publishes desktop; the server's nine
       # come from the howland repo onto the same release. An asset whose distribution channel is
       # NOT the release page is deliberately absent from this list rather than being a permanent
       # "not built" line — the iOS .ipa goes to App Store Connect, the Android packages to Google
@@ -1140,8 +1341,10 @@ jobs:
           take '*mac-arm64*.zip'         Howland-Desktop-macOS-arm64.zip
           take '*mac-x64*.dmg'           Howland-Desktop-macOS-x64.dmg
           take '*mac-x64*.zip'           Howland-Desktop-macOS-x64.zip
-          take '*win-x64*.exe'           Howland-Desktop-Windows-x64.exe
-          take '*win-arm64*.exe'         Howland-Desktop-Windows-arm64.exe
+          take 'Howland-Desktop-Windows-x64.exe'          Howland-Desktop-Windows-x64.exe
+          take 'Howland-Desktop-Windows-x64.exe.blockmap' Howland-Desktop-Windows-x64.exe.blockmap
+          take 'Howland-Desktop-Windows-arm64.exe'          Howland-Desktop-Windows-arm64.exe
+          take 'Howland-Desktop-Windows-arm64.exe.blockmap' Howland-Desktop-Windows-arm64.exe.blockmap
           take '*linux-x86_64*.AppImage' Howland-Desktop-Linux-x64.AppImage
           # ${arch} is not one token across Linux targets (electron-builder's
           # getArtifactArchName): AppImage x64 -> x86_64, deb x64 -> amd64, both arm64 -> arm64.
@@ -1184,9 +1387,8 @@ jobs:
           ls -la
 
       # The metadata files EXISTING is not the metadata being CORRECT. Every url: inside a
-      # latest*.yml must name a file that actually ships: a stale entry publishes green, passes a
-      # liveness sweep that only checks the yml resolves, and then 404s on every user's
-      # auto-update forever — the recorded sha512 and size stay valid, only the NAME is wrong.
+      # latest*.yml must name a file that actually ships. Windows differential updates also fetch
+      # <installer>.blockmap implicitly, so the stable blockmap must ship beside every named exe.
       - name: Updater metadata must name shipping files
         run: |
           set -euo pipefail
@@ -1201,6 +1403,13 @@ jobs:
                 echo "::error::$yml points at $ref, which is not in this release"
                 MISSING=$((MISSING+1))
               fi
+              case "$ref" in
+                Howland-Desktop-Windows-*.exe)
+                  if [ ! -f "release/$ref.blockmap" ]; then
+                    echo "::error::$yml requires $ref.blockmap, which is not in this release"
+                    MISSING=$((MISSING+1))
+                  fi ;;
+              esac
             done < /tmp/refs
           done
           [ "$MISSING" -eq 0 ]
@@ -1249,6 +1458,7 @@ jobs:
           else deselected="$deselected macOS"; fi
           if [ "$SEL_WINDOWS" = "true" ]; then
             EXPECTED="$EXPECTED Howland-Desktop-Windows-x64.exe Howland-Desktop-Windows-arm64.exe"
+            EXPECTED="$EXPECTED Howland-Desktop-Windows-x64.exe.blockmap Howland-Desktop-Windows-arm64.exe.blockmap"
             EXPECTED="$EXPECTED latest.yml latest-arm64.yml"
           else deselected="$deselected Windows"; fi
           if [ "$SEL_LINUX" = "true" ]; then

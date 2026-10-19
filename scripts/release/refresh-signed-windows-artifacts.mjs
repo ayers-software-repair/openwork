@@ -43,10 +43,23 @@ async function regenerateBlockmap(installerPath) {
 }
 
 function manifestName(installerName) {
+  if (installerName === "Howland-Desktop-Windows-x64.exe") return "latest.yml";
+  if (installerName === "Howland-Desktop-Windows-arm64.exe") return "latest-arm64.yml";
   if (installerName.startsWith("openwork-cloud-win-")) return "cloud.yml";
   if (installerName.startsWith("openwork-enterprise-win-")) return "enterprise.yml";
   if (installerName.startsWith("openwork-win-")) return "latest.yml";
   throw new Error(`Unsupported Windows installer name: ${installerName}`);
+}
+
+function manifestEntryMatches(installerName, url) {
+  if (url === installerName) return true;
+  if (installerName === "Howland-Desktop-Windows-x64.exe") {
+    return /^howland-win-x64-.+\.exe$/i.test(url);
+  }
+  if (installerName === "Howland-Desktop-Windows-arm64.exe") {
+    return /^howland-win-arm64-.+\.exe$/i.test(url);
+  }
+  return false;
 }
 
 function updateManifest(installerPath) {
@@ -64,15 +77,17 @@ function updateManifest(installerPath) {
     throw new Error(`Invalid Windows updater manifest: ${manifestPath}`);
   }
 
-  let matchedFile = false;
+  let matchedFiles = 0;
   manifest.files = manifest.files.map((file) => {
-    if (!file || file.url !== installerName) return file;
-    matchedFile = true;
-    return { ...file, sha512: installerSha512, size: installerSize };
+    if (!file || !manifestEntryMatches(installerName, file.url)) return file;
+    matchedFiles += 1;
+    return { ...file, url: installerName, sha512: installerSha512, size: installerSize };
   });
 
-  if (!matchedFile) {
-    throw new Error(`Manifest ${manifestPath} does not reference signed installer ${installerName}`);
+  if (matchedFiles !== 1) {
+    throw new Error(
+      `Manifest ${manifestPath} references ${matchedFiles} entries for signed installer ${installerName}; expected exactly one`,
+    );
   }
 
   manifest.path = installerName;
@@ -86,7 +101,9 @@ if (!existsSync(distRoot)) {
 }
 
 const installers = walk(distRoot).filter((file) =>
-  /^openwork(?:-(?:cloud|enterprise))?-win-(?:x64|arm64)-.+\.exe$/i.test(basename(file)),
+  /^(?:openwork(?:-(?:cloud|enterprise))?-win-(?:x64|arm64)-.+|Howland-Desktop-Windows-(?:x64|arm64))\.exe$/i.test(
+    basename(file),
+  ),
 );
 
 if (installers.length !== expectedCount) {
@@ -95,7 +112,7 @@ if (installers.length !== expectedCount) {
   process.exit(1);
 }
 
-for (const installer of installers) {
+for (const installer of installers.sort()) {
   await regenerateBlockmap(installer);
   updateManifest(installer);
   console.log(`Refreshed signed Windows artifact metadata: ${installer}`);

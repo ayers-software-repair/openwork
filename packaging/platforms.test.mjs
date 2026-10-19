@@ -65,7 +65,8 @@ function section(text, startsWith, endsWith) {
 // by the workflow itself.
 //
 // THE EXTENSION IS DELIBERATELY NOT AN ALLOWLIST and there is NO Howland- PREFIX ANCHOR. Six of
-// these seventeen assets are electron-updater feeds -- latest.yml, latest-arm64.yml,
+// these nineteen assets are installers, Windows blockmaps and electron-updater feeds --
+// latest.yml, latest-arm64.yml,
 // latest-mac.yml, latest-x64-mac.yml, latest-linux.yml, latest-linux-arm64.yml -- whose filenames
 // ARE the protocol request. howland's server parser anchors on `Howland-Server-` because every
 // server asset carries it; ported unchanged, that anchor drops a third of this train silently and
@@ -141,8 +142,8 @@ test("the parser reads every family out of release.yml, not just one", () => {
     );
   }
   assert.ok(
-    built.size >= 17,
-    `parsed ${built.size} names from release.yml, expected at least 17 — the reconcile step is ` +
+    built.size >= 19,
+    `parsed ${built.size} names from release.yml, expected at least 19 — the reconcile step is ` +
       `no longer being read whole`,
   );
   assert.ok(
@@ -157,10 +158,10 @@ test("the declaration and the workflows agree, in both directions", () => {
   for (const n of artifactOnlyAssets()) built.set(n, "artifact");
   for (const n of storeAssets()) built.set(n, "store");
 
-  assert.ok(built.size >= 22, `parsed ${built.size} names across both workflows, expected at least 22`);
+  assert.ok(built.size >= 24, `parsed ${built.size} names across both workflows, expected at least 24`);
 
   const declared = new Map(declaration.assets.map((a) => [a.name, a]));
-  assert.ok(declared.size >= 22, `platforms.json declares ${declared.size} assets — too few to be the train`);
+  assert.ok(declared.size >= 24, `platforms.json declares ${declared.size} assets — too few to be the train`);
 
   for (const [name, asset] of declared) {
     assert.ok(
@@ -194,6 +195,87 @@ test("the declaration and the workflows agree, in both directions", () => {
         `something its own declaration does not know about`,
     );
   }
+});
+
+test("Windows signs owned payloads before wrapping and refreshes metadata after final signing", () => {
+  const wf = workflowWithoutComments("release.yml");
+  const job = section(wf, "  package-windows:", "  build-android:");
+  const orderedSteps = [
+    "- name: Test final Windows updater artifact refresh",
+    "- name: Sign and verify the unpacked app and sidecars",
+    "- name: Package NSIS and the Store-only AppX from the signed app",
+    "- name: Sign and verify the final NSIS installer",
+    "- name: Refresh the final Windows updater artifacts",
+    "- name: Upload signed Windows installers",
+  ];
+  let previous = -1;
+  for (const step of orderedSteps) {
+    const at = job.indexOf(step);
+    assert.ok(at > previous, `${step} is missing or out of order in package-windows`);
+    previous = at;
+  }
+
+  assert.match(job, /runs-on: windows-latest/, "both architectures must package and sign on the supported x64 host");
+  assert.match(job, /strategy:\n\s+fail-fast: true/, "a failed Windows signing leg must stop its matrix peer");
+  assert.match(
+    section(job, "- name: Test final Windows updater artifact refresh", "- name: Sign and verify the unpacked app and sidecars"),
+    /node scripts\/release\/refresh-signed-windows-artifacts\.test\.mjs/,
+    "the dependency-ready Windows job does not run the updater-artifact regression test",
+  );
+  assert.equal(
+    (job.match(/uses: \.\/_platform\/codestyle\/ci\/actions\/windows-sign\n/g) ?? []).length,
+    2,
+    "the shared signer must handle the payload and the final NSIS installer",
+  );
+  for (const name of [
+    "AZURE_CLIENT_ID",
+    "AZURE_TENANT_ID",
+    "AZURE_SUBSCRIPTION_ID",
+    "AZURE_SIGNING_ENDPOINT",
+    "AZURE_SIGNING_ACCOUNT",
+    "AZURE_SIGNING_PROFILE",
+  ]) {
+    assert.match(job, new RegExp(`${name}:`), `package-windows does not expose ${name} to the shared contract`);
+  }
+  const partialGuard = job.indexOf("- name: Reject partial Windows signing configuration before private checkout");
+  const privateCheckout = job.indexOf("- name: Check out the shared Windows signer");
+  assert.ok(partialGuard !== -1 && partialGuard < privateCheckout, "partial signing config is not rejected before private checkout");
+  assert.match(
+    section(
+      job,
+      "- name: Reject partial Windows signing configuration before private checkout",
+      "- name: Check out the shared Windows signer",
+    ),
+    /if: \$\{\{ env\.ANY_SIGN == 'true' && env\.SIGN != 'true' \}\}/,
+    "the pre-check does not reject only the partial Azure-signing state",
+  );
+  assert.match(job, /ANY_SIGN:.*\|\|/, "package-windows does not distinguish an absent signing setup from a partial one");
+  assert.match(
+    section(job, "- name: Check out the shared Windows signer", "- name: Reject incomplete Windows signing configuration"),
+    /if: \$\{\{ env\.SIGN == 'true' \}\}[\s\S]*PLATFORM_READ_KEY/,
+    "an unsigned public-repository run can still require private platform access",
+  );
+  assert.match(
+    section(job, "- name: Reject incomplete Windows signing configuration", "- name: Download the native unpacked app"),
+    /if: \$\{\{ env\.SIGN == 'true' \}\}/,
+    "the shared validator can run without its signed-path checkout",
+  );
+  assert.doesNotMatch(job, /WINDOWS_CERT|PFX_/, "the retired PFX path remains in package-windows");
+  assert.match(job, /-c\.win\.signExecutable=false/, "electron-builder could introduce a second signer");
+  assert.match(job, /Howland-Desktop-Windows-x64\.exe\.blockmap/);
+  assert.match(job, /Howland-Desktop-Windows-arm64\.exe\.blockmap/);
+
+  const native = section(wf, "  build-desktop:", "  package-windows:");
+  assert.match(native, /TARGETS=\(--dir\)/, "native Windows legs are still wrapping before transfer");
+  assert.match(native, /name: unpacked-\$\{\{ matrix\.artifact \}\}/, "native unpacked apps are not transferred");
+
+  const release = section(wf, "  release:", "      - name: Start the howland server release");
+  assert.match(release, /needs: \[preflight, build-desktop, package-windows\]/);
+  assert.doesNotMatch(
+    section(release, "- name: Collect what was built", "- name: Checksum what shipped"),
+    /\.appx/,
+    "the Store-only AppX can reach public release collection",
+  );
 });
 
 test("a store-channel asset is never declared published", () => {

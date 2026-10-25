@@ -150,6 +150,13 @@ const BLANK_SLATE_LAUNCH = resolveBlankSlateLaunch({
 });
 const APP_NAME = BLANK_SLATE_LAUNCH.appName;
 let currentDisplayAppName = APP_NAME;
+// The window says "Howland AI"; the app name, which also labels the icon, shortcut and menu,
+// stays "Howland". An organization's brand name, when one is set, titles the window instead.
+const WINDOW_TITLE =
+  APP_NAME === HOWLAND_APP_NAME || APP_NAME.startsWith(`${HOWLAND_APP_NAME} - `)
+    ? `Howland AI${APP_NAME.slice(HOWLAND_APP_NAME.length)}`
+    : APP_NAME;
+const windowTitle = () => (currentDisplayAppName === APP_NAME ? WINDOW_TITLE : currentDisplayAppName);
 installStdioErrorHandlers();
 installSocketTypeOfServiceGuard();
 await initOpenworkSentry({
@@ -2117,9 +2124,9 @@ const desktopCommandHandlers = {
       runtimeProcess: process,
       app,
       applicationMenu,
-      window: mainWindow,
       },
     );
+    mainWindow?.setTitle(windowTitle());
     if (process.platform === "win32" && !BLANK_SLATE_LAUNCH.enabled) {
       await registerWindowsDisplayShortcut();
     }
@@ -2435,7 +2442,7 @@ async function createMainWindow() {
     height: initialHeight,
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
-    title: currentDisplayAppName,
+    title: windowTitle(),
     show: false,
     ...(process.platform === "win32" ? { skipTaskbar: true } : {}),
     ...windowAppearanceOptions,
@@ -2476,12 +2483,12 @@ async function createMainWindow() {
 
   mainWindow.on("page-title-updated", (event) => {
     event.preventDefault();
-    mainWindow?.setTitle(currentDisplayAppName);
+    mainWindow?.setTitle(windowTitle());
   });
-  mainWindow.setTitle(currentDisplayAppName);
+  mainWindow.setTitle(windowTitle());
 
   mainWindow.once("ready-to-show", () => {
-    mainWindow?.setTitle(currentDisplayAppName);
+    mainWindow?.setTitle(windowTitle());
     if (process.platform === "win32") mainWindow?.setSkipTaskbar(false);
     mainWindow?.show();
     flushPendingDeepLinks();

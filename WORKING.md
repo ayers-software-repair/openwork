@@ -13,7 +13,8 @@ never touch or redistribute `/ee` (FSL). Branding is build-time overrides only
 pnpm only. It builds Howland's DESKTOP (six OS/arch legs) and publishes them onto the one
 `howland-v1.0.0` release of `ayers-software-repair/howland-releases`. ANDROID builds the store
 packages only (Play `.aab`, Amazon `.apk`) as the `store-android` Actions artifact: phones install
-from stores only and nothing side-loads (owner, D1625).
+from stores only and nothing side-loads (owner, D1625). With `PLAY_SUBMISSION_ENABLED` set, the
+leg also uploads the AAB to Play's internal track through the kit's `play-upload`.
 
 ## The workflows (all of them — 20 of 22 upstream workflows are deleted)
 
@@ -32,7 +33,9 @@ from stores only and nothing side-loads (owner, D1625).
   without signing secrets (a store submission has no release to be partial about — uniformity
   is the same rule, not the same behaviour). Produces `Howland-Client-iOS-arm64.ipa` as a
   90-day CI artifact, never a release asset (howland-releases is public; the authenticated
-  run page is the channel); the run summary is the operator interface.
+  run page is the channel); the run summary is the operator interface. `submit=true` uploads it
+  to App Store Connect through the kit's `app-store-upload`, and fails before the archive unless
+  `APPLE_SUBMISSION_ENABLED` and the three `APP_STORE_CONNECT_*` secrets are set.
 - **`build-electron-desktop.yml`** — CI proof build, dispatch only.
 
 ## Facts a session will need

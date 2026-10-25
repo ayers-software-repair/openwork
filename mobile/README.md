@@ -72,13 +72,17 @@ env vars in `capacitor.config.ts` control this:
 Android builds in **`.github/workflows/release.yml`** (the one desktop+mobile release; the
 separate mobile workflow is folded in). The `build-android` leg uploads the signed
 `Howland-Client-Android.aab` (Google Play) and `.apk` (Amazon Appstore) as the `store-android`
-Actions artifact for store submission; neither ever reaches the release page, because phones
-install from stores only (owner, D1625). Without its signing secrets the leg builds only the
+Actions artifact; neither ever reaches the release page, because phones install from stores only
+(owner, D1625). When `vars.PLAY_SUBMISSION_ENABLED` is `true` the leg also uploads the AAB to
+Play's internal track through the platform kit's `play-upload` action; the APK stays a hand upload
+to Amazon. Without its signing secrets the leg builds only the
 debug-signed `unsigned-android` twin for testing.
 
 iOS builds in **`.github/workflows/ios-submission.yml`** — its own dispatch, out of the
 release chain. It HARD FAILS without signing secrets, and its `.ipa` is a 90-day CI artifact
-on the run page (never a release asset; App Store Connect is the channel). The export
+on the run page (never a release asset; App Store Connect is the channel). Dispatched with
+`submit`, it also validates and uploads the `.ipa` through the platform kit's `app-store-upload`
+action; that refuses to start unless `vars.APPLE_SUBMISSION_ENABLED` is `true`. The export
 `method` defaults to `app-store`; change it (with a matching provisioning profile) to
 `ad-hoc` or `development` for direct device sideloading.
 
@@ -89,7 +93,12 @@ Android: `ANDROID_KEYSTORE_BASE64` (base64 of the upload keystore), `ANDROID_KEY
 
 iOS: `APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`, `APPLE_TEAM_ID`,
 `APPLE_PROVISIONING_PROFILE_BASE64` (bundle id `repair.ayers.howland`; the profile NAME is derived
-from the file — no separate name secret).
+from the file — no separate name secret). Submission adds `APP_STORE_CONNECT_KEY_P8` (the `.p8`
+text), `APP_STORE_CONNECT_KEY_ID` and `APP_STORE_CONNECT_ISSUER_ID`.
+
+Play upload: variables `PLAY_SUBMISSION_ENABLED`, `GCP_WORKLOAD_IDENTITY_PROVIDER` and
+`GCP_PLAY_SERVICE_ACCOUNT` (keyless, over OIDC). Both uploads also need `PLATFORM_READ_KEY` to
+check the kit out.
 
 Publishing (shared with the desktop legs): `RELEASES_PAT`, `contents:write` on
 `ayers-software-repair/howland-releases`.

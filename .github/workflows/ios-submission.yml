@@ -19,6 +19,11 @@ name: Submit Howland for iOS
 # It writes no skip records either: it owes the release nothing, so there is no expected asset for
 # it to explain.
 #
+# SUBMIT UPLOADS IT. With submit=true the run validates and uploads the .ipa to App Store Connect
+# through the platform kit's app-store-upload action, the same step Magpie uses. It refuses to start
+# unless vars.APPLE_SUBMISSION_ENABLED is true (set once the listing exists) and all three
+# APP_STORE_CONNECT_* secrets are present. Without submit the .ipa is a hand upload.
+#
 # THE BINARY STAYS A CI ARTIFACT, deliberately, and it EXPIRES — 90 days, the ceiling GitHub
 # allows on a public repository, set explicitly below. It is never published to howland-releases:
 # that repo is PUBLIC, and a signed store binary on a public download page is exposure with no
@@ -39,6 +44,10 @@ on:
         description: 'Compile with signing DISABLED and produce nothing - build evidence without an enrollment (an installable .ipa still requires the signing secrets)'
         type: boolean
         default: false
+      submit:
+        description: 'Validate and upload the .ipa to App Store Connect (needs vars.APPLE_SUBMISSION_ENABLED and the APP_STORE_CONNECT_* secrets)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -54,9 +63,29 @@ jobs:
     if: github.repository == 'ayers-software-repair/openwork'
     runs-on: macos-latest
     timeout-minutes: 60
+    env:
+      SUBMISSION_ENABLED: ${{ vars.APPLE_SUBMISSION_ENABLED }}
+      ASC_KEY_PRESENT: ${{ secrets.APP_STORE_CONNECT_KEY_P8 != '' }}
+      ASC_KEY_ID_PRESENT: ${{ secrets.APP_STORE_CONNECT_KEY_ID != '' }}
+      ASC_ISSUER_PRESENT: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      # Checked before the 10x-billed archive: a submit that cannot upload must not build first.
+      - name: Require App Store Connect submission readiness
+        if: ${{ inputs.submit }}
+        env:
+          COMPILE_PROOF: ${{ inputs.compile_proof }}
+        run: |
+          set -euo pipefail
+          [ "$COMPILE_PROOF" != true ] \
+            || { echo "::error::submit and compile_proof together: a compile proof produces nothing to upload"; exit 1; }
+          [ "$SUBMISSION_ENABLED" = true ] \
+            || { echo "::error::first listings are manual; set vars.APPLE_SUBMISSION_ENABLED=true only after the listing exists"; exit 1; }
+          [ "$ASC_KEY_PRESENT" = true ] && [ "$ASC_KEY_ID_PRESENT" = true ] && [ "$ASC_ISSUER_PRESENT" = true ] \
+            || { echo "::error::submit requires APP_STORE_CONNECT_KEY_P8, APP_STORE_CONNECT_KEY_ID and APP_STORE_CONNECT_ISSUER_ID"; exit 1; }
+          echo "SUBMIT_READY=true" >> "$GITHUB_ENV"
       # The iOS leg owes the release NOTHING: the .ipa is never a release asset (it goes to App
       # Store Connect, and an .ipa on a release page is not installable by a normal person). So
       # it writes no skip records — there is no expected asset for it to explain.
@@ -345,6 +374,31 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      # The private platform checkout runs only on a submit that passed the readiness step, so a
+      # plain build never reads PLATFORM_READ_KEY.
+      - name: Check out the shared App Store uploader
+        if: ${{ env.SUBMIT_READY == 'true' }}
+        uses: actions/checkout@v7
+        with:
+          repository: ayers-software-repair/platform
+          ref: v0.71.0
+          ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
+          persist-credentials: false
+          path: _platform
+          sparse-checkout: |
+            codestyle/ci/actions/app-store-upload/
+
+      - name: Upload to App Store Connect
+        if: ${{ env.SUBMIT_READY == 'true' }}
+        uses: ./_platform/codestyle/ci/actions/app-store-upload
+        with:
+          file: out/Howland-Client-iOS-arm64.ipa
+          platform: ios
+          key-p8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          enabled: ${{ env.SUBMIT_READY }}
+
       # This summary is the owner's interface to this workflow: it is dispatched by hand, and the
       # binary is collected by hand from the run page. A run that says only "green" leaves the
       # person who pressed the button to go hunting for what it made.
@@ -363,8 +417,12 @@ jobs:
             echo "| Build number | ${{ github.run_number }} |"
             echo "| Bundle id | repair.ayers.howland |"
             echo
-            echo "Download it from the **Artifacts** section of this run page, then upload it to"
-            echo "App Store Connect (Transporter, or Xcode's Organizer)."
+            if [ "${SUBMIT_READY:-}" = true ]; then
+              echo "Validated and uploaded to App Store Connect; it appears in TestFlight once processed."
+            else
+              echo "Download it from the **Artifacts** section of this run page, then upload it to"
+              echo "App Store Connect (Transporter, or Xcode's Organizer), or dispatch again with submit."
+            fi
             echo
             echo "The build number rises with every dispatch, which is what App Store Connect"
             echo "requires — it refuses a re-upload at a build number it has already seen."

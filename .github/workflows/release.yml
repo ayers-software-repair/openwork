@@ -155,7 +155,7 @@ jobs:
       # a dispatch cannot route around it, because the release is the moment the answer costs
       # money. node --test, no dependencies, so it adds seconds rather than a pnpm install.
       - name: The declaration agrees with the workflows
-        run: node --test packaging/platforms.test.mjs
+        run: node --test packaging/platforms.test.mjs packaging/store-uploads.test.mjs
 
       # SELECTION, computed once. The desktop matrix spans three platforms inside one job, so
       # per-platform selection has to shape the MATRIX — a deselected macOS leg that merely
@@ -1030,9 +1030,21 @@ jobs:
       needs.preflight.outputs.android == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # id-token lets the Play upload sign in to Google Cloud over OIDC, with no key file.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PLAY_ENABLED: ${{ vars.PLAY_SUBMISSION_ENABLED == 'true' }}
+      PLAY_READY: ${{ vars.PLAY_SUBMISSION_ENABLED == 'true' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_PLAY_SERVICE_ACCOUNT != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Reject incomplete Play upload configuration
+        if: ${{ env.PLAY_ENABLED == 'true' && env.PLAY_READY != 'true' }}
+        run: |
+          echo "::error::PLAY_SUBMISSION_ENABLED needs GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_PLAY_SERVICE_ACCOUNT"
+          exit 1
       # No keystore means no store packages: the leg builds the debug-signed twin only and says
       # which secret would change that.
       - name: Decide whether this leg can sign
@@ -1243,6 +1255,31 @@ jobs:
           name: store-android
           if-no-files-found: error
           path: store-android/*
+
+      # Play gets the AAB on its internal track; the APK stays in store-android for Amazon's hand
+      # upload (Live App Testing has no API).
+      - name: Check out the shared Play uploader
+        if: ${{ env.CAN_SHIP == 'true' && env.PLAY_READY == 'true' }}
+        uses: actions/checkout@v7
+        with:
+          repository: ayers-software-repair/platform
+          ref: v0.71.0
+          ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
+          persist-credentials: false
+          path: _platform
+          sparse-checkout: |
+            codestyle/ci/actions/play-upload/
+
+      - name: Upload to Google Play (internal track)
+        if: ${{ env.CAN_SHIP == 'true' && env.PLAY_READY == 'true' }}
+        uses: ./_platform/codestyle/ci/actions/play-upload
+        with:
+          bundle: store-android/Howland-Client-Android.aab
+          package-name: repair.ayers.howland
+          track: internal
+          workload-identity-provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service-account: ${{ vars.GCP_PLAY_SERVICE_ACCOUNT }}
+          enabled: ${{ env.PLAY_READY }}
 
       # BUILDING IS NEVER GATED ON SIGNING (owner law 2026-08-31): with no keystore the leg
       # still builds — as a DEBUG-SIGNED APK, because that is the only unsigned form a person

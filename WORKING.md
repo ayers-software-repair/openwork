@@ -7,35 +7,31 @@ this file carries only what is specific to this fork.
 
 ## What this fork is
 
-`different-ai/openwork` fork (`upstream` remote), default branch `howland`, MIT surface only —
+`ayers-software-repair/openwork` fork of `different-ai/openwork` (`upstream` remote), default
+branch `howland`, MIT surface only —
 never touch or redistribute `/ee` (FSL). Branding is build-time overrides only
 (electron-builder `-c` flags, env, icon swap); no internal renames, so upstream still merges.
-pnpm only. It builds Howland's DESKTOP (six OS/arch legs) and publishes them onto the one
-`howland-v1.0.0` release of `ayers-software-repair/howland-releases`. ANDROID builds the store
-packages only (Play `.aab`, Amazon `.apk`) as the `store-android` Actions artifact: phones install
-from stores only and nothing side-loads (owner, D1625). With `PLAY_SUBMISSION_ENABLED` set, the
-leg also uploads the AAB to Play's internal track through the kit's `play-upload`.
+pnpm only. It prepares Howland DESKTOP installers (six OS/arch legs) and Android store packages
+(Play `.aab`, Amazon `.apk`) as retained Actions artifacts. Explicit publication verifies the
+prepared receipt and reuses the same desktop bytes on `ayers-software-repair/howland-releases`.
+Phones install from stores only and nothing side-loads (owner, D1625); vendor submissions use
+the separately verified store bundle and enabled targets.
 
-## The workflows (all of them — 20 of 22 upstream workflows are deleted)
+## The release workflows
 
-- **`release.yml`** — the desktop+Android release. Preflight (sidecar release exists with all
-  six asset names AND was built from the commit `constants.json` pins as `opencodeCommit`;
-  RELEASES_PAT has WRITE on howland-releases) -> build-desktop (matrix COMPUTED from the
-  `heads_*` selection; Windows produces native unpacked apps) -> package-windows (one x64 host
-  signs both architectures' fork-owned payloads, wraps NSIS/AppX, signs NSIS and refreshes updater
-  metadata) + build-android -> release (collect, checksum-what-shipped, updater
-  metadata must name shipping files, reconcile, publish, then chain-dispatch howland's server
-  release forwarding the selection). Publish-what-signs: a leg without its secrets skips with
-  a skip record; reconcile turns records into named "Not built" summary lines and hard-fails
-  on any unexplained absence. Subset runs do not regenerate Howland-Desktop-CHECKSUMS.txt
-  (it spans three platforms); the Android manifest regenerates whenever Android is selected.
-- **`ios-submission.yml`** — the store head, dispatch only, out of the chain. HARD FAILS
-  without signing secrets (a store submission has no release to be partial about — uniformity
-  is the same rule, not the same behaviour). Produces `Howland-Client-iOS-arm64.ipa` as a
-  90-day CI artifact, never a release asset (howland-releases is public; the authenticated
-  run page is the channel); the run summary is the operator interface. `submit=true` uploads it
-  to App Store Connect through the kit's `app-store-upload`, and fails before the archive unless
-  `APPLE_SUBMISSION_ENABLED` and the three `APP_STORE_CONNECT_*` secrets are set.
+- **`release.yml`** — desktop+Android preparation. Preflight verifies the pinned sidecar,
+  release permissions, selected `heads_*` and version. Build legs retain signed output; missing
+  signing credentials leave skip records, while unexplained missing files fail. The
+  `prepared-release` receipt binds the completed run, attempt, source and artifact bytes.
+  An explicit `publish=true` dispatch verifies that receipt and reuses those files without
+  rebuilding. Public preparation requires an accepted RC at the same source commit; publication
+  checks existing assets before writing and may then dispatch the separately prepared server.
+- **`ios-submission.yml`** — the independent signed IPA build, dispatch only. The IPA remains a
+  retained CI artifact, never a public release asset; `prepared-ios` records its exact build and
+  source. A compile-proof run produces no IPA or receipt. Store upload is separate.
+- **`store-bundle.yml`** — verifies the independent desktop/Android and iOS receipts, source and
+  build identities, retains their exact bytes in one bundle, then submits only enabled vendor
+  targets on a separate RC or public dispatch.
 - **`build-electron-desktop.yml`** — CI proof build, dispatch only.
 
 ## Facts a session will need
@@ -44,17 +40,18 @@ leg also uploads the AAB to Play's internal track through the kit's `play-upload
   `opencodeCommit` (the SHA it must have been built from). Both change together when the
   sidecar is re-cut; preflight enforces agreement.
 - The sidecar fetch (`apps/desktop/scripts/prepare-sidecar.mjs`) exits 1 on a missing asset —
-  why the sidecar release must exist first, and why the chain's first link cuts it.
-- Version is stamped from the tag via extraMetadata (locked 1.0.0 fallback on any
-  non-semver). Each non-Windows leg rewrites its updater metadata to stable asset names. Windows
+  why the sidecar release must exist before client preparation.
+- Version is resolved from the exact tag by the shared release-version action; invalid tags
+  fail instead of silently falling back to 1.0.0. RC display, numeric package and store build
+  values stay distinct. Each non-Windows leg rewrites updater metadata to stable asset names. Windows
   signs the stable NSIS installer, then regenerates its matching `.exe.blockmap` and feed SHA-512
   and size from those final bytes;
   `howlandUpdaterChannel()` in updater.mjs pins the channel explicitly because
   electron-updater's filename heuristics would hand an arm64 Mac the Intel zip. Update
   payloads are the same stable assets; Windows publishes architecture-specific blockmaps.
 - Android: network_security_config.xml scopes cleartext for self-hosted LAN servers (Android
-  has no CIDR syntax — confirmed platform limitation); versionCode = run number because
-  store build codes must increase across the 1.0.0-in-place loop.
+  has no CIDR syntax — confirmed platform limitation); the shared action supplies the
+  increasing store build code, recorded in the preparation receipt.
 - Upstream analytics are killed at build time (empty VITE_OPENWORK_POSTHOG_KEY).
 - PRs target `dev` upstream-style; prove UI flows with `pnpm fraimz --flow <id>`.
 
@@ -78,11 +75,8 @@ leg also uploads the AAB to Play's internal track through the kit's `play-upload
 
 ## Open here
 
-- **`release.yml:749` uses `ls *.appx 2>/dev/null | head -1`** — the SIGPIPE-abortable pipe this
-  repo already paid for at `:657`. Safe TODAY because the appx target emits exactly one file per
-  leg, so `head -1` never closes the pipe early. It stops being safe the moment a second .appx
-  appears (a per-arch split, a second target). Replace with a glob-into-array read rather than a
-  pipe when that happens. Recorded on cto's word: not a blocker, not to be fixed mid-lane.
+- The earlier `ls *.appx | head -1` signing-package risk was recorded on cto's word; the
+  current Windows packaging path selects architecture-specific output and rejects ambiguity.
 - **actionlint is not installed on this box and sessions never install** (`~/source/CLAUDE.md`).
   Every workflow edit in this fork this session was verified by `yaml.safe_load` plus a structural
   read of the parsed job graph — NOT by actionlint. Two cards asked for actionlint-clean as

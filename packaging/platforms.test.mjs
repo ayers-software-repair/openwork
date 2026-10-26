@@ -244,7 +244,7 @@ test("Windows signs owned payloads before wrapping and refreshes metadata after 
   assert.match(native, /name: unpacked-\$\{\{ matrix\.artifact \}\}/, "native unpacked apps are not transferred");
 
   const release = section(wf, "  release:", "      - name: Start the howland server release");
-  assert.match(release, /needs: \[preflight, build-desktop, package-windows\]/);
+  assert.match(release, /needs: \[preflight, build-desktop, package-windows, build-android\]/);
   assert.doesNotMatch(
     section(release, "- name: Collect what was built", "- name: Checksum what shipped"),
     /\.appx/,

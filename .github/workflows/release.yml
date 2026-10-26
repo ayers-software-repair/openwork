@@ -1,14 +1,14 @@
 name: Release Howland
 
 # ONE DISPATCH BUILDS EVERY HEAD THE RELEASE PAGE CARRIES. Desktop (six OS/arch legs) builds from
-# this one workflow and publishes onto the SAME howland-v<version> release, the way Magpie's
+# this one workflow and prepares assets for the SAME howland-v<version> release, the way Magpie's
 # release.yml does. The server publishes onto the same release from the howland repo — a different
 # repo, so that stays its own workflow.
 #
 # ANDROID BUILDS HERE AND NEVER REACHES THE PAGE. Phones install from stores only (owner ruling
 # D1625: nothing side-loads), so the signed .aab (Google Play) and .apk (Amazon Appstore) upload as
-# the store-android Actions artifact, the hand-off for store submission, and the release job does
-# not wait for them.
+# the store-android Actions artifact, the hand-off for store submission. Full RC preparation
+# requires this artifact; vendor submission remains an independent later decision.
 #
 # iOS IS NOT HERE, and that is the same rule stated the other way round. The .ipa is not a release
 # asset — App Store Connect is its channel, and an .ipa on a release page installs for nobody — so
@@ -58,6 +58,31 @@ on:
       tag:
         description: 'Release tag to create/attach (e.g. howland-v1.0.0)'
         required: true
+      publish:
+        description: 'Publish an exact prepared run without rebuilding'
+        type: boolean
+        default: false
+      prepared_run_id:
+        description: 'Successful preparation run ID for publication'
+        type: string
+      prepared_run_attempt:
+        description: 'Exact preparation attempt'
+        type: string
+      server_prepared_run_id:
+        description: 'Exact prepared server run to publish after this client release'
+        type: string
+      server_prepared_run_attempt:
+        description: 'Exact prepared server attempt'
+        type: string
+      accepted_rc_run_id:
+        description: 'Accepted RC preparation run ID for a public preparation'
+        type: string
+      accepted_rc_run_attempt:
+        description: 'Accepted RC preparation attempt'
+        type: string
+      accepted_rc_version:
+        description: 'Accepted RC version'
+        type: string
       # SELECTIVE BUILDS (owner order 2026-08-25: "test the Mac server first, then widen").
       # One boolean per platform, DEFAULT TRUE, and a tag push carries no inputs at all, so the
       # selection must read EMPTY as true.
@@ -97,6 +122,7 @@ on:
 # The GITHUB_TOKEN only checks out this repo; publishing goes through RELEASES_PAT.
 permissions:
   contents: read
+  actions: read
 
 jobs:
   # PREFLIGHT. Nothing perishable is discovered on a ten-times-billed runner.
@@ -111,7 +137,7 @@ jobs:
   # fails a build leg exactly as hard as one that does not exist, and the names are the part that
   # drifts (see the asset table in prepare-sidecar.mjs).
   preflight:
-    if: github.repository == 'ayers-software-repair/openwork'
+    if: ${{ github.repository == 'ayers-software-repair/openwork' && inputs.publish != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # THE HEADS-GATE ROUTING (estate item 47): added to this existing job rather than a new one
@@ -124,9 +150,35 @@ jobs:
       windows: ${{ steps.sel.outputs.windows }}
       linux: ${{ steps.sel.outputs.linux }}
       android: ${{ steps.sel.outputs.android }}
+      version: ${{ steps.version.outputs.display }}
+      numeric: ${{ steps.version.outputs.version }}
+      four: ${{ steps.version.outputs.four }}
+      deb: ${{ steps.version.outputs.deb }}
+      channel: ${{ steps.version.outputs.channel }}
+      build: ${{ steps.version.outputs.build }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: ayers-software-repair/platform
+          ref: v0.73.0
+          ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
+          persist-credentials: false
+          path: _platform
+          sparse-checkout: codestyle/ci/
+      - name: Resolve exact version before spending build minutes
+        id: version
+        uses: ./_platform/codestyle/ci/actions/release-version
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          prefix: howland-v
+      - name: Require explicit accepted RC for public preparation
+        if: ${{ steps.version.outputs.channel == 'public' }}
+        env:
+          RC_ID: ${{ inputs.accepted_rc_run_id }}
+        run: |
+          [[ "$RC_ID" =~ ^[1-9][0-9]*$ ]] || { echo '::error::public preparation requires an accepted RC run'; exit 1; }
 
       # Resolved BEFORE every other check so the selection is in the log even when one of them
       # fails. Same case/`!= "false"` shape as magpie's version job and howland's own preflight
@@ -155,7 +207,7 @@ jobs:
       # a dispatch cannot route around it, because the release is the moment the answer costs
       # money. node --test, no dependencies, so it adds seconds rather than a pnpm install.
       - name: The declaration agrees with the workflows
-        run: node --test packaging/platforms.test.mjs packaging/store-uploads.test.mjs
+        run: node --test packaging/platforms.test.mjs packaging/store-uploads.test.mjs packaging/release-lineage.test.mjs
 
       # SELECTION, computed once. The desktop matrix spans three platforms inside one job, so
       # per-platform selection has to shape the MATRIX — a deselected macOS leg that merely
@@ -507,6 +559,9 @@ jobs:
       - name: Package Electron desktop (Howland installers)
         shell: bash
         env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          WINDOWS_BUILD_VERSION: ${{ needs.preflight.outputs.four }}
+          WINDOWS_BUILD: ${{ needs.preflight.outputs.build }}
           # Kill upstream analytics: an empty key disables PostHog in any build (the resolver
           # otherwise falls back to upstream's hardcoded default key in prod builds).
           VITE_OPENWORK_POSTHOG_KEY: ""
@@ -530,12 +585,11 @@ jobs:
           # workflows (this file x3, ios-submission x1). Two drifted variants once coexisted;
           # latent only because the tag filter is howland-v* alone, and a widened filter would
           # have had desktop and mobile disagree about the same tag.
-          VERSION=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-(mobile-)?)?v?//')
-          case "$VERSION" in
-            *[!0-9.]*|"") VERSION=1.0.0 ;;  # any non-digit/dot (or nothing) is not a version
-            [0-9]*.[0-9]*.[0-9]*) ;;        # a full semver from the tag — use it
-            *) VERSION=1.0.0 ;;             # a bare "1" or "1.2" — the locked version
-          esac
+          VERSION="$RELEASE_VERSION"
+          WINDOWS_VERSION_ARGS=()
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            WINDOWS_VERSION_ARGS=(-c.buildVersion="$WINDOWS_BUILD_VERSION" -c.buildNumber="$WINDOWS_BUILD")
+          fi
           echo "Stamping Howland app version: $VERSION"
           pnpm --filter @openwork/desktop run build:electron
           # THE URL SCHEMES, via a COMMITTED config that extends upstream's.
@@ -620,6 +674,7 @@ jobs:
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
             -c.productName=Howland -c.appId=repair.ayers.howland \
             -c.extraMetadata.version="$VERSION" \
+            ${WINDOWS_VERSION_ARGS[@]+"${WINDOWS_VERSION_ARGS[@]}"} \
             -c.extraMetadata.desktopName=repair.ayers.howland \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
             -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
@@ -927,20 +982,41 @@ jobs:
       # Partner Center identity; Azure Artifact Signing does not replace that identity.
       - name: Package NSIS and the Store-only AppX from the signed app
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          WINDOWS_BUILD_VERSION: ${{ needs.preflight.outputs.four }}
+          WINDOWS_BUILD: ${{ needs.preflight.outputs.build }}
+          RELEASE_NUMERIC_VERSION: ${{ needs.preflight.outputs.numeric }}
         run: |
           set -euo pipefail
-          VERSION=$(echo "${{ github.event.inputs.tag || github.ref_name }}" | sed -E 's/^(howland-(mobile-)?)?v?//')
-          case "$VERSION" in
-            *[!0-9.]*|"") VERSION=1.0.0 ;;
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *) VERSION=1.0.0 ;;
-          esac
-          # electron-builder, not Bash, expands the literal ${os}, ${arch}, ${version} and ${ext} macros.
+          VERSION="$RELEASE_VERSION"
+          if ! [[ "$WINDOWS_BUILD" =~ ^[1-9][0-9]{0,4}$ ]] || ((WINDOWS_BUILD > 65535)); then
+            echo "::error::invalid Store build number"
+            exit 1
+          fi
+          [[ "$RELEASE_NUMERIC_VERSION" =~ ^([1-9][0-9]*)\.([0-9]+)\.[0-9]+$ ]] || { echo "::error::invalid numeric release version"; exit 1; }
+          # Store identity reserves revision zero; the prepackaged app retains its RC version.
+          APPX_STORE_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$WINDOWS_BUILD"
           # shellcheck disable=SC2016
           pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
-            --prepackaged "$GITHUB_WORKSPACE/windows-unpacked" --win nsis appx --${{ matrix.arch }} \
+            --prepackaged "$GITHUB_WORKSPACE/windows-unpacked" --win appx --${{ matrix.arch }} \
+            -c.productName=Howland -c.appId=repair.ayers.howland \
+            -c.extraMetadata.version="$APPX_STORE_VERSION" \
+            -c.appx.setBuildNumber=false \
+            -c.extraMetadata.desktopName=repair.ayers.howland \
+            '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
+            -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
+            -c.extraMetadata.license="MIT" \
+            -c.copyright="Copyright (c) 2026 Different AI. Howland additions Copyright Ayers Electronics Inc. MIT License." \
+            -c.win.signExecutable=false \
+            --publish never
+          # NSIS and executable resources use the normal four-part Windows build version.
+          # shellcheck disable=SC2016
+          pnpm --dir apps/desktop exec electron-builder --config electron-builder.howland.yml \
+            --prepackaged "$GITHUB_WORKSPACE/windows-unpacked" --win nsis --${{ matrix.arch }} \
             -c.productName=Howland -c.appId=repair.ayers.howland \
             -c.extraMetadata.version="$VERSION" \
+            -c.buildVersion="$WINDOWS_BUILD_VERSION" -c.buildNumber="$WINDOWS_BUILD" \
             -c.extraMetadata.desktopName=repair.ayers.howland \
             '-c.artifactName=howland-${os}-${arch}-${version}.${ext}' \
             -c.extraMetadata.description="Howland - private, offline, self-hosted AI and survival library" \
@@ -1030,21 +1106,11 @@ jobs:
       needs.preflight.outputs.android == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # id-token lets the Play upload sign in to Google Cloud over OIDC, with no key file.
     permissions:
       contents: read
-      id-token: write
-    env:
-      PLAY_ENABLED: ${{ vars.PLAY_SUBMISSION_ENABLED == 'true' }}
-      PLAY_READY: ${{ vars.PLAY_SUBMISSION_ENABLED == 'true' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_PLAY_SERVICE_ACCOUNT != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Reject incomplete Play upload configuration
-        if: ${{ env.PLAY_ENABLED == 'true' && env.PLAY_READY != 'true' }}
-        run: |
-          echo "::error::PLAY_SUBMISSION_ENABLED needs GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_PLAY_SERVICE_ACCOUNT"
-          exit 1
       # No keystore means no store packages: the leg builds the debug-signed twin only and says
       # which secret would change that.
       - name: Decide whether this leg can sign
@@ -1121,18 +1187,14 @@ jobs:
       - name: Stamp Android version
         working-directory: mobile
         env:
-          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          ANDROID_BUILD: ${{ needs.preflight.outputs.build }}
         run: |
           set -euo pipefail
-          VERSION=$(echo "$RAW_TAG" | sed -E 's/^(howland-(mobile-)?)?v?//')
-          case "$VERSION" in
-            *[!0-9.]*|"") VERSION=1.0.0 ;;  # any non-digit/dot (or nothing) is not a version
-            [0-9]*.[0-9]*.[0-9]*) ;;        # a full semver from the tag — use it
-            *) VERSION=1.0.0 ;;             # a bare "1" or "1.2" — the locked version
-          esac
+          VERSION="$RELEASE_VERSION"
           G=android/app/build.gradle
           sed -i -E "s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" "$G"
-          sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/" "$G"
+          sed -i -E "s/versionCode [0-9]+/versionCode $ANDROID_BUILD/" "$G"
           grep -E "versionName|versionCode" "$G"
 
       # Howland servers are self-hosted and speak plain http on the user's LAN or tailnet, so
@@ -1256,31 +1318,6 @@ jobs:
           if-no-files-found: error
           path: store-android/*
 
-      # Play gets the AAB on its internal track; the APK stays in store-android for Amazon's hand
-      # upload (Live App Testing has no API).
-      - name: Check out the shared Play uploader
-        if: ${{ env.CAN_SHIP == 'true' && env.PLAY_READY == 'true' }}
-        uses: actions/checkout@v7
-        with:
-          repository: ayers-software-repair/platform
-          ref: v0.71.0
-          ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
-          persist-credentials: false
-          path: _platform
-          sparse-checkout: |
-            codestyle/ci/actions/play-upload/
-
-      - name: Upload to Google Play (internal track)
-        if: ${{ env.CAN_SHIP == 'true' && env.PLAY_READY == 'true' }}
-        uses: ./_platform/codestyle/ci/actions/play-upload
-        with:
-          bundle: store-android/Howland-Client-Android.aab
-          package-name: repair.ayers.howland
-          track: internal
-          workload-identity-provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service-account: ${{ vars.GCP_PLAY_SERVICE_ACCOUNT }}
-          enabled: ${{ env.PLAY_READY }}
-
       # BUILDING IS NEVER GATED ON SIGNING (owner law 2026-08-31): with no keystore the leg
       # still builds — as a DEBUG-SIGNED APK, because that is the only unsigned form a person
       # can actually install; an unsigned release APK/AAB is a file no device accepts, which
@@ -1319,11 +1356,12 @@ jobs:
     # stopping the run. preflight is added to `needs` here (not just via build-desktop) because a
     # job can only read another job's `outputs` when it is a DIRECT need — transitive needs do not
     # expose them.
-    needs: [preflight, build-desktop, package-windows]
+    needs: [preflight, build-desktop, package-windows, build-android]
     if: >-
       always() &&
       needs.preflight.result == 'success' &&
       (needs.preflight.outputs.windows != 'true' || needs.package-windows.result == 'success') &&
+      (needs.preflight.outputs.android != 'true' || needs.build-android.result == 'success') &&
       github.repository == 'ayers-software-repair/openwork'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -1334,9 +1372,6 @@ jobs:
     # howland-v1.0.0 release with softprops updates. Constant name on purpose: publishes are
     # quick, the version is locked at 1.0.0, and job-level concurrency can't see step-computed
     # tags.
-    concurrency:
-      group: howland-releases-publish
-      cancel-in-progress: false
     steps:
       - name: Checkout (for RELEASE_NOTES.md)
         uses: actions/checkout@v7
@@ -1457,16 +1492,8 @@ jobs:
       # published tag always matches the version stamped into the binaries.
       - name: Version
         id: v
-        env:
-          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          VERSION=$(echo "$RAW_TAG" | sed -E 's/^(howland-(mobile-)?)?v?//')
-          case "$VERSION" in
-            *[!0-9.]*|"") VERSION=1.0.0 ;;  # any non-digit/dot (or nothing) is not a version
-            [0-9]*.[0-9]*.[0-9]*) ;;        # a full semver from the tag — use it
-            *) VERSION=1.0.0 ;;             # a bare "1" or "1.2" — the locked version
-          esac
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=${{ needs.preflight.outputs.version }}" >> "$GITHUB_OUTPUT"
       # RECONCILIATION — the whole point of the design. Three outcomes per expected asset:
       #   present                      -> published
       #   absent WITH a skip record    -> reported in the summary, run stays GREEN
@@ -1597,57 +1624,311 @@ jobs:
             echo "Nothing staged for the release page: every built asset in this selection publishes on a non-release channel, and the reconcile step accounted for each absence. The release page is untouched." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # Publish to the PUBLIC howland-releases repo (the public download + issues home). PUBLIC so the site
-      # links to /releases/latest/download/<StableName>, always current, zero redeploy. RELEASES_PAT = a
-      # token with contents:write on ayers-software-repair/howland-releases, set as a secret on this fork.
-      # Notes come from RELEASE_NOTES.md in this repo; edit that file per version to tune the release notes.
-      - name: Publish to the public releases repo
+      - name: Retain reconciled desktop payload
         if: ${{ steps.staged.outputs.count != '0' }}
+        run: |
+          set -euo pipefail
+          mkdir -p prepared/out
+          cp release/* prepared/out/
+          cp RELEASE_NOTES.md prepared/release-body.md
+          [ "$(find prepared/out -maxdepth 1 -type f | wc -l)" -gt 0 ]
+      - uses: actions/upload-artifact@v7
+        if: ${{ steps.staged.outputs.count != '0' }}
+        with:
+          name: validated-release-payload
+          path: prepared/
+          retention-days: 30
+          if-no-files-found: error
+          compression-level: 0
+
+  prepared-release:
+    needs: [preflight, release, build-android]
+    if: >-
+      !cancelled() && inputs.publish != true
+      && needs.preflight.result == 'success'
+      && needs.release.result == 'success'
+      && needs.build-android.result == 'success'
+      && needs.preflight.outputs.macos == 'true'
+      && needs.preflight.outputs.windows == 'true'
+      && needs.preflight.outputs.linux == 'true'
+      && needs.preflight.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: ayers-software-repair/platform
+          ref: v0.73.0
+          ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
+          persist-credentials: false
+          path: _platform
+          sparse-checkout: codestyle/ci/release/
+      - uses: actions/setup-node@v7
+        with: { node-version: '24' }
+      - uses: actions/download-artifact@v8
+        with:
+          name: validated-release-payload
+          path: prepared
+      - uses: actions/download-artifact@v8
+        with:
+          name: store-android
+          path: prepared/android
+      - name: Bind Android's independent source run and build code
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          ANDROID_BUILD: ${{ needs.preflight.outputs.build }}
+        run: |
+          set -euo pipefail
+          test -s prepared/android/Howland-Client-Android.aab
+          test -s prepared/android/Howland-Client-Android.apk
+          jq -n --arg version "$VERSION" --arg sha "$GITHUB_SHA" \
+            --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg androidBuild "$ANDROID_BUILD" \
+            '{version:$version,sha:$sha,androidRunId:$runId,androidRunAttempt:$runAttempt,androidBuild:$androidBuild}' > prepared/android-build.json
+      - name: Verify explicitly accepted RC before public preparation
+        if: ${{ needs.preflight.outputs.channel == 'public' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RC_ID: ${{ inputs.accepted_rc_run_id }}
+          RC_ATTEMPT: ${{ inputs.accepted_rc_run_attempt }}
+          RC_VERSION: ${{ inputs.accepted_rc_version }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$RC_ID" =~ ^[1-9][0-9]*$ && "$RC_ATTEMPT" =~ ^[1-9][0-9]*$ && "$RC_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$ ]]
+          [ "${RC_VERSION%-rc.*}" = "$VERSION" ]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RC_ID" > "$RUNNER_TEMP/rc-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RC_ID/artifacts?per_page=100" > "$RUNNER_TEMP/rc-artifacts.json"
+          mkdir -p accepted-rc
+          gh run download "$RC_ID" -n prepared-release -D accepted-rc
+          ref_sha=''
+          if jq -e '.event == "push"' "$RUNNER_TEMP/rc-run.json" >/dev/null; then
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/howland-v$RC_VERSION" > "$RUNNER_TEMP/rc-ref.json"
+            ref_sha=$(jq -r '.object.sha' "$RUNNER_TEMP/rc-ref.json")
+            if [ "$(jq -r '.object.type' "$RUNNER_TEMP/rc-ref.json")" = tag ]; then
+              ref_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$ref_sha" --jq '.object.sha')
+            fi
+          fi
+          jq -n --arg dir accepted-rc --arg repository "$GITHUB_REPOSITORY" \
+            --argjson run "$(cat "$RUNNER_TEMP/rc-run.json")" \
+            --argjson artifacts "$(cat "$RUNNER_TEMP/rc-artifacts.json")" \
+            --arg runAttempt "$RC_ATTEMPT" --arg sha "$GITHUB_SHA" --arg version "$RC_VERSION" \
+            --arg refSha "$ref_sha" \
+            '{dir:$dir,repository:$repository,run:$run,artifacts:$artifacts,runAttempt:$runAttempt,sha:$sha,version:$version,refSha:$refSha,policy:({id:"howland-client",workflow:".github/workflows/release.yml",artifact:"prepared-release",requiredArtifacts:["validated-release-payload","store-android"],requiredFiles:["release-body.md","android-build.json","android/Howland-Client-Android.aab","android/Howland-Client-Android.apk"],requiredPrefixes:["out/"]} + (if $run.event == "push" then {tagPrefix:"howland-v"} else {} end))}' > "$RUNNER_TEMP/rc-verify.json"
+          node _platform/codestyle/ci/release/prepared-release.mjs verify "$RUNNER_TEMP/rc-verify.json"
+          jq '{runId,runAttempt,sha,version,lineage}' accepted-rc/receipt.json > "$RUNNER_TEMP/accepted-rc.json"
+      - name: Seal native and Android packages with exact source identities
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/artifacts.json"
+          accepted='null'
+          if [ -s "$RUNNER_TEMP/accepted-rc.json" ]; then accepted=$(cat "$RUNNER_TEMP/accepted-rc.json"); fi
+          jq -n --arg dir prepared --arg repository "$GITHUB_REPOSITORY" \
+            --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg sha "$GITHUB_SHA" --arg version "$VERSION" \
+            --arg sourceRef "${{ github.event_name == 'push' && github.ref || '' }}" \
+            --argjson tagged "${{ github.event_name == 'push' }}" \
+            --argjson artifacts "$(cat "$RUNNER_TEMP/artifacts.json")" --argjson acceptedRc "$accepted" \
+            '{dir:$dir,repository:$repository,runId:$runId,runAttempt:$runAttempt,sha:$sha,version:$version,sourceRef:$sourceRef,lineage:{},acceptedRc:$acceptedRc,artifacts:$artifacts,policy:({id:"howland-client",workflow:".github/workflows/release.yml",artifact:"prepared-release",requiredArtifacts:["validated-release-payload","store-android"],requiredFiles:["release-body.md","android-build.json","android/Howland-Client-Android.aab","android/Howland-Client-Android.apk"],requiredPrefixes:["out/"]} + (if $tagged then {tagPrefix:"howland-v"} else {} end))}' > "$RUNNER_TEMP/write.json"
+          node _platform/codestyle/ci/release/prepared-release.mjs write "$RUNNER_TEMP/write.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: prepared-release
+          path: prepared/
+          retention-days: 30
+          if-no-files-found: error
+          compression-level: 0
+
+  prepared-source:
+    if: ${{ inputs.publish == true && github.repository == 'ayers-software-repair/openwork' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: ayers-software-repair/platform
+          ref: v0.73.0
+          ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
+          persist-credentials: false
+          path: _platform
+          sparse-checkout: codestyle/ci/release/
+      - uses: actions/setup-node@v7
+        with: { node-version: '24' }
+      - uses: actions/download-artifact@v8
+        with:
+          name: prepared-release
+          path: prepared
+          run-id: ${{ inputs.prepared_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify completed source, attempt, artifact identities and bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREPARED_RUN_ID: ${{ inputs.prepared_run_id }}
+          PREPARED_ATTEMPT: ${{ inputs.prepared_run_attempt }}
+          VERSION: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$PREPARED_RUN_ID" =~ ^[1-9][0-9]*$ && "$PREPARED_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VERSION" =~ ^howland-v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]]
+          expected_version="${VERSION#howland-v}"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREPARED_RUN_ID" > "$RUNNER_TEMP/run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREPARED_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/artifacts.json"
+          event=$(jq -r '.event' "$RUNNER_TEMP/run.json")
+          [ "$event" = push ] || [ "$event" = workflow_dispatch ]
+          ref_sha=''
+          if [ "$event" = push ]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" > "$RUNNER_TEMP/ref.json"
+            ref_sha=$(jq -r '.object.sha' "$RUNNER_TEMP/ref.json")
+            if [ "$(jq -r '.object.type' "$RUNNER_TEMP/ref.json")" = tag ]; then
+              ref_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$ref_sha" --jq '.object.sha')
+            fi
+          fi
+          jq -n --arg dir prepared --arg repository "$GITHUB_REPOSITORY" \
+            --argjson run "$(cat "$RUNNER_TEMP/run.json")" \
+            --argjson artifacts "$(cat "$RUNNER_TEMP/artifacts.json")" \
+            --arg runAttempt "$PREPARED_ATTEMPT" --arg sha "$GITHUB_SHA" \
+            --arg version "$expected_version" --arg refSha "$ref_sha" --arg event "$event" \
+            '{dir:$dir,repository:$repository,run:$run,runAttempt:$runAttempt,sha:$sha,version:$version,refSha:$refSha,artifacts:$artifacts,policy:({id:"howland-client",workflow:".github/workflows/release.yml",artifact:"prepared-release",requiredArtifacts:["validated-release-payload","store-android"],requiredFiles:["release-body.md","android-build.json","android/Howland-Client-Android.aab","android/Howland-Client-Android.apk"],requiredPrefixes:["out/"]} + (if $event == "push" then {tagPrefix:"howland-v"} else {} end))}' > "$RUNNER_TEMP/verify.json"
+          node _platform/codestyle/ci/release/prepared-release.mjs verify "$RUNNER_TEMP/verify.json"
+
+  publish-release:
+    needs: prepared-source
+    if: ${{ !cancelled() && needs.prepared-source.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: howland-releases-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        if: ${{ inputs.chain }}
+        with:
+          repository: ayers-software-repair/platform
+          ref: v0.73.0
+          ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
+          persist-credentials: false
+          path: _platform
+          sparse-checkout: codestyle/ci/release/
+      - uses: actions/setup-node@v7
+        if: ${{ inputs.chain }}
+        with: { node-version: '24' }
+      - uses: actions/download-artifact@v8
+        with:
+          name: prepared-release
+          path: prepared
+          run-id: ${{ inputs.prepared_run_id }}
+          github-token: ${{ github.token }}
+      - name: Require nonempty exact native payload
+        run: |
+          set -euo pipefail
+          [ "$(find prepared/out -maxdepth 1 -type f | wc -l)" -gt 0 ]
+      - name: Require server preparation before a chained publication
+        if: ${{ inputs.chain }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          SERVER_RUN_ID: ${{ inputs.server_prepared_run_id }}
+          SERVER_ATTEMPT: ${{ inputs.server_prepared_run_attempt }}
+          VERSION_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$SERVER_RUN_ID" =~ ^[1-9][0-9]*$ && "$SERVER_ATTEMPT" =~ ^[1-9][0-9]*$ ]] \
+            || { echo '::error::chained publication requires exact prepared server run and attempt'; exit 1; }
+          server_tag="howland-server-v${VERSION_TAG#howland-v}"
+          gh api "repos/ayers-software-repair/howland/actions/runs/$SERVER_RUN_ID" > "$RUNNER_TEMP/server-run.json"
+          gh api "repos/ayers-software-repair/howland/actions/runs/$SERVER_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/server-artifacts.json"
+          jq -e --arg attempt "$SERVER_ATTEMPT" \
+            '.path == ".github/workflows/server-release.yml" and .status == "completed" and .conclusion == "success" and (.run_attempt|tostring) == $attempt' \
+            "$RUNNER_TEMP/server-run.json" >/dev/null
+          gh api "repos/ayers-software-repair/howland/git/ref/tags/$server_tag" > "$RUNNER_TEMP/server-tag.json"
+          tag_sha=$(jq -r '.object.sha' "$RUNNER_TEMP/server-tag.json")
+          if [ "$(jq -r '.object.type' "$RUNNER_TEMP/server-tag.json")" = tag ]; then
+            tag_sha=$(gh api "repos/ayers-software-repair/howland/git/tags/$tag_sha" --jq '.object.sha')
+          fi
+          [ "$tag_sha" = "$(jq -r '.head_sha' "$RUNNER_TEMP/server-run.json")" ] \
+            || { echo '::error::server tag and prepared source commit differ'; exit 1; }
+          mkdir -p server-prepared
+          gh run download "$SERVER_RUN_ID" --repo ayers-software-repair/howland -n prepared-release -D server-prepared
+          event=$(jq -r '.event' "$RUNNER_TEMP/server-run.json")
+          [ "$event" = push ] || [ "$event" = workflow_dispatch ]
+          version=${VERSION_TAG#howland-v}
+          jq -n --arg dir server-prepared --arg repository ayers-software-repair/howland \
+            --argjson run "$(cat "$RUNNER_TEMP/server-run.json")" \
+            --argjson artifacts "$(cat "$RUNNER_TEMP/server-artifacts.json")" \
+            --arg runAttempt "$SERVER_ATTEMPT" --arg sha "$tag_sha" --arg version "$version" \
+            --arg refSha "$tag_sha" --arg event "$event" \
+            '{dir:$dir,repository:$repository,run:$run,runAttempt:$runAttempt,sha:$sha,version:$version,refSha:$refSha,artifacts:$artifacts,policy:({id:"howland-server",workflow:".github/workflows/server-release.yml",artifact:"prepared-release",requiredArtifacts:["validated-release-payload","prepared-docker-image"],requiredFiles:["release-body.md","docker-image.json"],requiredPrefixes:["out/"]} + (if $event == "push" then {tagPrefix:"howland-server-v"} else {} end))}' > "$RUNNER_TEMP/server-verify.json"
+          node _platform/codestyle/ci/release/prepared-release.mjs verify "$RUNNER_TEMP/server-verify.json"
+          # A successful server preparation is insufficient if this shared release already
+          # carries server assets: the chained server publisher would refuse them after this
+          # client publisher had already changed the release.
+          status=$(curl -sS --retry 3 -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            -o "$RUNNER_TEMP/shared-release.json" \
+            "https://api.github.com/repos/ayers-software-repair/howland-releases/releases/tags/$VERSION_TAG")
+          case "$status" in
+            404) ;;
+            200)
+              release_id=$(jq -er '.id' "$RUNNER_TEMP/shared-release.json")
+              gh api --paginate --slurp "repos/ayers-software-repair/howland-releases/releases/$release_id/assets?per_page=100" \
+                | jq -r '.[][] | .name | select(startswith("Howland-Server-"))' > "$RUNNER_TEMP/server-assets"
+              if [ -s "$RUNNER_TEMP/server-assets" ]; then
+                echo '::error::server assets already published for this version'; exit 1
+              fi
+              ;;
+            *) echo "::error::cannot inspect shared release (HTTP $status)"; exit 1 ;;
+          esac
+      - name: Refuse to replace published desktop bytes
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [ "$(gh api repos/ayers-software-repair/howland-releases --jq '.permissions.push')" = true ]
+          status=$(curl -sS --retry 3 -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            -o "$RUNNER_TEMP/release.json" \
+            "https://api.github.com/repos/ayers-software-repair/howland-releases/releases/tags/$TAG")
+          case "$status" in
+            404) exit 0 ;;
+            200) ;;
+            *) echo "::error::cannot inspect existing release (HTTP $status)"; exit 1 ;;
+          esac
+          release_id=$(jq -er '.id' "$RUNNER_TEMP/release.json")
+          gh api --paginate --slurp "repos/ayers-software-repair/howland-releases/releases/$release_id/assets?per_page=100" \
+            | jq -r '.[][] | .name | select(startswith("Howland-Desktop-") or startswith("latest"))' > "$RUNNER_TEMP/desktop-names"
+          if [ -s "$RUNNER_TEMP/desktop-names" ]; then
+            echo '::error::this version already has desktop assets; published bytes are immutable'; exit 1
+          fi
+      - name: Publish the retained desktop assets
         uses: softprops/action-gh-release@v3
         with:
           repository: ayers-software-repair/howland-releases
           token: ${{ secrets.RELEASES_PAT }}
-          # Normalized, never the raw ref: a v* or malformed tag/dispatch input must not mint
-          # a second release tag on howland-releases — that would become "latest" and 404
-          # every family's /releases/latest/download/<name> link (ONE RELEASE TRAIN).
-          tag_name: howland-v${{ steps.v.outputs.version }}
-          # Both families (desktop, server) share ONE release per version; the title is the
-          # plain product+version so whichever workflow publishes last leaves the same name.
-          name: Howland ${{ steps.v.outputs.version }}
-          body_path: RELEASE_NOTES.md
-          files: release/*
+          tag_name: ${{ inputs.tag }}
+          name: Howland ${{ inputs.tag }}
+          body_path: prepared/release-body.md
+          files: prepared/out/*
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(inputs.tag, '-rc.') }}
+          make_latest: ${{ contains(inputs.tag, '-rc.') && 'false' || 'true' }}
           fail_on_unmatched_files: true
-
-      # THE CHAIN, link two: desktop -> server. Runs only if every step above succeeded
-      # (default step semantics — no always()), so a failed publish never starts a server
-      # build. Opt-OUT via the `chain` input; a tag push carries no inputs and chains. The
-      # heads_ selection is forwarded so a subset desktop run starts an equally-narrow server
-      # run instead of spending full-matrix money nobody asked for. The order itself is real:
-      # both publish onto the same howland-v1.0.0 release, and this used to be a numbered list
-      # in a document the owner did not know existed (owner ruling 2026-08-25 — a written step
-      # is not a step that happens).
-      - name: Start the howland server release
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.chain }}
+      - name: Start exact prepared server publication after client success
+        if: ${{ inputs.chain }}
         env:
-          # Needs actions:write on ayers-software-repair/howland. If RELEASES_PAT is
-          # contents-only this fails LOUDLY here, after the desktop release published fine —
-          # rerun the server workflow by hand and extend the PAT.
           GH_TOKEN: ${{ secrets.RELEASES_PAT }}
-          # Resolved once in preflight's `sel` step — see the input-block comment above.
-          # Forwarded to server-release.yml's own workflow_dispatch as literal strings
-          # ("true"/"false") via `-f`, exactly the shape its boolean inputs — and its own `sel`
-          # step (howland server-release.yml, estate item 11) — already expect.
-          SEL_MACOS: ${{ needs.preflight.outputs.macos }}
-          SEL_WINDOWS: ${{ needs.preflight.outputs.windows }}
-          SEL_LINUX: ${{ needs.preflight.outputs.linux }}
+          SERVER_RUN_ID: ${{ inputs.server_prepared_run_id }}
+          SERVER_ATTEMPT: ${{ inputs.server_prepared_run_attempt }}
+          VERSION_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          gh workflow run server-release.yml \
-            --repo ayers-software-repair/howland --ref main \
-            -f heads_macos="$SEL_MACOS" -f heads_windows="$SEL_WINDOWS" -f heads_linux="$SEL_LINUX"
-          {
-            echo
-            echo "Started the howland server release (heads: macos=$SEL_MACOS windows=$SEL_WINDOWS linux=$SEL_LINUX)."
-          } >> "$GITHUB_STEP_SUMMARY"
+          [[ "$SERVER_RUN_ID" =~ ^[1-9][0-9]*$ && "$SERVER_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          gh workflow run server-release.yml --repo ayers-software-repair/howland \
+            --ref "howland-server-v${VERSION_TAG#howland-v}" \
+            -f version="${VERSION_TAG#howland-v}" -f publish=true \
+            -f prepared_run_id="$SERVER_RUN_ID" -f prepared_run_attempt="$SERVER_ATTEMPT"

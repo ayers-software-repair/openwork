@@ -1,9 +1,10 @@
 # CLAUDE.md — the Howland desktop/mobile fork
 
-This is `different-ai/openwork` forked (`upstream` remote), and the branch that matters is
-**`howland`** — the fork's default. It builds Howland's desktop (six OS/arch legs) onto the one
-`howland-v1.0.0` release of `ayers-software-repair/howland-releases`, and the Android store
-packages as an Actions artifact (phones install from stores only, D1625).
+This is `ayers-software-repair/openwork`, forked from `different-ai/openwork` (`upstream` remote).
+The branch that matters is **`howland`** — this fork's default. It prepares Howland desktop
+installers and Android store packages as retained Actions artifacts. Explicit publication reuses
+the verified desktop bytes on `ayers-software-repair/howland-releases`; phones install from stores
+only (D1625).
 
 Read `WORKING.md` here for this fork's current state; the governing queue, standing rulings and
 cross-repo record live in **`../howland/WORKING.md`** (the howland maintainer session and the
@@ -20,20 +21,21 @@ Hard rules:
 - `constants.json` pins the opencode sidecar by `opencodeVersion` AND `opencodeCommit`;
   they change together when the sidecar is re-cut, and `release.yml`'s preflight enforces
   agreement with the fork release's SOURCE-COMMIT.txt.
-- Load-bearing workflows: `release.yml` (desktop+Android; preflight-gated, `heads_*`
-  selective, publish-what-signs with skip records and reconciliation; chains into howland's
-  server release on success), `ios-submission.yml` (store head, dispatch only, hard-fails
-  unsigned; its .ipa is a CI artifact, never a release asset), `contract.yml` (push/PR only;
-  runs the release contract and nothing else — no publish path, `contents: read`). No
-  `schedule:` triggers, ever.
+- Load-bearing workflows: `release.yml` (desktop+Android preparation with `heads_*` selection,
+  skip records and a source-bound receipt; explicit publication reuses that run's artifacts and
+  can chain the separately prepared server), `ios-submission.yml` (independent signed IPA and
+  receipt), `store-bundle.yml` (verifies independent Android/iOS runs before any enabled store
+  submission), and `contract.yml` (push/PR release contract; no publish path, `contents: read`).
+  No `schedule:` triggers, ever.
 - **`packaging/platforms.json` declares what this fork builds**, on three channels (release
   page / Actions artifact / store), and `packaging/platforms.test.mjs` holds both workflows to
   it in both directions — `node --test packaging/platforms.test.mjs`, no pnpm install. Any
   asset rename or new leg lands in the same change as its row, and reddens
   `../howland/installer/release_assets_test.go`'s 28-asset count, which is the only cross-repo
   tripwire there is.
-- Nothing publishes, tags, or dispatches without explicit owner go-ahead. Version locked at
-  1.0.0, overwritten in place. No emojis; no AI attribution in commits; commit identity per
+- Nothing publishes, tags, or dispatches without explicit owner go-ahead. Prepare an RC first;
+  public promotion requires its verified receipt, the same source commit and retained bytes.
+  Published `1.0.0` is immutable. No emojis; no AI attribution in commits; commit identity per
   the workspace CLAUDE.md.
 - Asset names follow `<Product>-<Component>-<Platform>-<Arch>.<ext>`;
   `../howland/installer/release_assets_test.go` binds the train — update it in the same

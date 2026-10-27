@@ -49,4 +49,4 @@ jobs:
         with:
           node-version: '22'
       - name: The declaration agrees with the workflows
-        run: node --test packaging/platforms.test.mjs
+        run: node --test packaging/platforms.test.mjs packaging/store-uploads.test.mjs packaging/release-lineage.test.mjs

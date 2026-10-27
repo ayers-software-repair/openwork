@@ -18,29 +18,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { workflowWithoutComments, section } from "./workflow-text.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.join(here, "..");
 
 const declaration = JSON.parse(readFileSync(path.join(here, "platforms.json"), "utf8"));
-
-// Full-line `#` comments removed before any matching.
-//
-// COPIED FROM howland's workflowWithoutComments FOR THE REASON IT WAS WRITTEN: its first version
-// failed on its own epitaph -- the comment explaining what a key USED to be matched the assertion
-// forbidding it. Reference versus mention, inside the guard. Here the same trap is live and
-// larger: release.yml's header quotes the retired sentence "There is no unsigned proof mode" in
-// full, and both workflows name every asset in prose while explaining the decisions about them.
-//
-// Full-line only: a `#` inside a quoted value stays. That is the right side to err on -- missing a
-// comment leaves a false positive that announces itself, where stripping a value hides a real key.
-function workflowWithoutComments(name) {
-  const raw = readFileSync(path.join(repo, ".github", "workflows", name), "utf8");
-  return raw
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("#"))
-    .join("\n");
-}
 
 // THE INTERPOLATION IS EXPANDED BEFORE MATCHING, NOT MATCHED AROUND (howland's parser law, from
 // two bugs it paid for): a bare prefix pattern truncates `...-${{ matrix.arch }}.dmg` at the "-",
@@ -48,14 +30,6 @@ function workflowWithoutComments(name) {
 // text ordinary and the pattern simple, which is the fix rather than a third escape.
 function expanded(text, arch) {
   return text.replaceAll(/\$\{\{[^}]*\}\}/g, arch);
-}
-
-function section(text, startsWith, endsWith) {
-  const from = text.indexOf(startsWith);
-  assert.notEqual(from, -1, `no ${JSON.stringify(startsWith)} in the workflow — this parser is not reading the step it names`);
-  const rest = text.slice(from + startsWith.length);
-  const to = rest.indexOf(endsWith);
-  return to === -1 ? rest : rest.slice(0, to);
 }
 
 // The release-page set, read from the reconcile step's own EXPECTED composition. That list became
@@ -270,7 +244,7 @@ test("Windows signs owned payloads before wrapping and refreshes metadata after 
   assert.match(native, /name: unpacked-\$\{\{ matrix\.artifact \}\}/, "native unpacked apps are not transferred");
 
   const release = section(wf, "  release:", "      - name: Start the howland server release");
-  assert.match(release, /needs: \[preflight, build-desktop, package-windows\]/);
+  assert.match(release, /needs: \[preflight, build-desktop, package-windows, build-android\]/);
   assert.doesNotMatch(
     section(release, "- name: Collect what was built", "- name: Checksum what shipped"),
     /\.appx/,

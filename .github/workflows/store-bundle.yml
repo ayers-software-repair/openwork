@@ -1,0 +1,266 @@
+name: Howland Store Bundle
+
+# The desktop/Android and iOS archives have independent build numbers and run histories.
+# A bundle run verifies both completed source receipts, retains their exact bytes, and is the
+# one artifact-run-id passed to the shared store workflow. RC upload and public promotion
+# are later explicit dispatches against the same successful bundle run.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'prepare, release-rc, or promote-public'
+        required: true
+        type: choice
+        options: [prepare, release-rc, promote-public]
+      rc_version:
+        description: 'Exact accepted RC display version, X.Y.Z-rc.N'
+        required: true
+        type: string
+      desktop_android_run_id:
+        description: 'Prepared client desktop/Android run ID (prepare only)'
+        type: string
+      desktop_android_attempt:
+        description: 'Prepared client desktop/Android attempt (prepare only)'
+        type: string
+      ios_run_id:
+        description: 'Prepared iOS run ID (prepare only)'
+        type: string
+      ios_attempt:
+        description: 'Prepared iOS attempt (prepare only)'
+        type: string
+      bundle_run_id:
+        description: 'Successful prepared bundle run for release or promotion'
+        type: string
+      bundle_attempt:
+        description: 'Exact bundle attempt for release or promotion'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: howland-store-bundle
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: ${{ inputs.mode == 'prepare' && github.repository == 'ayers-software-repair/openwork' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: ayers-software-repair/platform
+          ref: v0.76.0
+          ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
+          persist-credentials: false
+          path: _platform
+          sparse-checkout: codestyle/ci/release/
+      - uses: actions/setup-node@v7
+        with: { node-version: '24' }
+      - name: Require the exact source's successful contract run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SELECTED_TAG: howland-v${{ inputs.rc_version }}
+        run: bash scripts/release/verify-contract-ci.sh
+      - name: Require two exact completed RC source runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESKTOP_ID: ${{ inputs.desktop_android_run_id }}
+          DESKTOP_ATTEMPT: ${{ inputs.desktop_android_attempt }}
+          IOS_ID: ${{ inputs.ios_run_id }}
+          IOS_ATTEMPT: ${{ inputs.ios_attempt }}
+          RC_VERSION: ${{ inputs.rc_version }}
+        run: |
+          set -euo pipefail
+          [[ "$RC_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$ ]]
+          for value in "$DESKTOP_ID" "$DESKTOP_ATTEMPT" "$IOS_ID" "$IOS_ATTEMPT"; do
+            [[ "$value" =~ ^[1-9][0-9]*$ ]]
+          done
+          [ "$DESKTOP_ID" != "$IOS_ID" ]
+          for pair in "desktop:$DESKTOP_ID" "ios:$IOS_ID"; do
+            kind=${pair%%:*}; run_id=${pair#*:}
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > "$RUNNER_TEMP/$kind-run.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" > "$RUNNER_TEMP/$kind-artifacts.json"
+          done
+          mkdir -p source-desktop source-ios
+          gh run download "$DESKTOP_ID" -n prepared-release -D source-desktop
+          gh run download "$IOS_ID" -n prepared-ios -D source-ios
+          ref_sha=''
+          if jq -e '.event == "push"' "$RUNNER_TEMP/desktop-run.json" >/dev/null; then
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/howland-v$RC_VERSION" > "$RUNNER_TEMP/desktop-ref.json"
+            ref_sha=$(jq -r '.object.sha' "$RUNNER_TEMP/desktop-ref.json")
+            if [ "$(jq -r '.object.type' "$RUNNER_TEMP/desktop-ref.json")" = tag ]; then
+              ref_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$ref_sha" --jq '.object.sha')
+            fi
+          fi
+          jq -n --arg dir source-desktop --arg repository "$GITHUB_REPOSITORY" \
+            --argjson run "$(cat "$RUNNER_TEMP/desktop-run.json")" \
+            --argjson artifacts "$(cat "$RUNNER_TEMP/desktop-artifacts.json")" \
+            --arg runAttempt "$DESKTOP_ATTEMPT" --arg sha "$GITHUB_SHA" --arg version "$RC_VERSION" \
+            --arg refSha "$ref_sha" \
+            '{dir:$dir,repository:$repository,run:$run,runAttempt:$runAttempt,sha:$sha,version:$version,refSha:$refSha,artifacts:$artifacts,policy:({id:"howland-client",workflow:".github/workflows/release.yml",artifact:"prepared-release",requiredArtifacts:["validated-release-payload","store-android"],requiredFiles:["release-body.md","android-build.json","android/Howland-Client-Android.aab","android/Howland-Client-Android.apk"],requiredPrefixes:["out/"]} + (if $run.event == "push" then {tagPrefix:"howland-v"} else {} end))}' > "$RUNNER_TEMP/desktop-verify.json"
+          node _platform/codestyle/ci/release/prepared-release.mjs verify "$RUNNER_TEMP/desktop-verify.json"
+          jq -n --arg dir source-ios --arg repository "$GITHUB_REPOSITORY" \
+            --argjson run "$(cat "$RUNNER_TEMP/ios-run.json")" \
+            --argjson artifacts "$(cat "$RUNNER_TEMP/ios-artifacts.json")" \
+            --arg runAttempt "$IOS_ATTEMPT" --arg sha "$GITHUB_SHA" --arg version "$RC_VERSION" \
+            '{dir:$dir,repository:$repository,run:$run,runAttempt:$runAttempt,sha:$sha,version:$version,artifacts:$artifacts,policy:{id:"howland-client-ios",workflow:".github/workflows/ios-submission.yml",artifact:"prepared-ios",requiredArtifacts:["Howland-Client-iOS-arm64.ipa"],requiredFiles:["Howland-Client-iOS-arm64.ipa","build.json"],requiredPrefixes:[]}}' > "$RUNNER_TEMP/ios-verify.json"
+          node _platform/codestyle/ci/release/prepared-release.mjs verify "$RUNNER_TEMP/ios-verify.json"
+          jq -e --arg sha "$GITHUB_SHA" --arg version "$RC_VERSION" '.sha == $sha and .version == $version and (.androidBuild | test("^[1-9][0-9]*$"))' source-desktop/android-build.json >/dev/null
+          jq -e --arg sha "$GITHUB_SHA" --arg version "$RC_VERSION" '.sha == $sha and .version == $version and (.iosBuild | test("^[1-9][0-9]*$"))' source-ios/build.json >/dev/null
+      - name: Retain verified member bytes and independent build identities
+        run: |
+          set -euo pipefail
+          mkdir -p bundle/android bundle/ios
+          cp source-desktop/android/Howland-Client-Android.aab source-desktop/android/Howland-Client-Android.apk bundle/android/
+          cp source-ios/Howland-Client-iOS-arm64.ipa bundle/ios/
+          jq -n --slurpfile desktop source-desktop/receipt.json --slurpfile ios source-ios/receipt.json \
+            --slurpfile android source-desktop/android-build.json --slurpfile apple source-ios/build.json \
+            '{desktopAndroid:{runId:$desktop[0].runId,runAttempt:$desktop[0].runAttempt,sha:$desktop[0].sha,version:$desktop[0].version,sourceArtifacts:$desktop[0].artifacts,androidBuild:$android[0].androidBuild},ios:{runId:$ios[0].runId,runAttempt:$ios[0].runAttempt,sha:$ios[0].sha,version:$ios[0].version,sourceArtifacts:$ios[0].artifacts,iosBuild:$apple[0].iosBuild,marketingVersion:$apple[0].marketingVersion}}' > bundle/members.json
+          [ "$(jq -r '.desktopAndroid.sha' bundle/members.json)" = "$(jq -r '.ios.sha' bundle/members.json)" ]
+      - uses: actions/upload-artifact@v7
+        with:
+          name: store-android
+          path: bundle/android/
+          retention-days: 30
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Howland-Client-iOS-arm64.ipa
+          path: bundle/ios/Howland-Client-iOS-arm64.ipa
+          retention-days: 30
+          if-no-files-found: error
+          compression-level: 0
+      - name: Seal the two independently proven source histories
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RC_VERSION: ${{ inputs.rc_version }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/artifacts.json"
+          jq -n --arg dir bundle --arg repository "$GITHUB_REPOSITORY" \
+            --arg runId "$GITHUB_RUN_ID" --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg sha "$GITHUB_SHA" --arg version "$RC_VERSION" \
+            --argjson lineage "$(cat bundle/members.json)" \
+            --argjson artifacts "$(cat "$RUNNER_TEMP/artifacts.json")" \
+            '{dir:$dir,repository:$repository,runId:$runId,runAttempt:$runAttempt,sha:$sha,version:$version,lineage:$lineage,artifacts:$artifacts,policy:{id:"howland-client-store-bundle",workflow:".github/workflows/store-bundle.yml",artifact:"prepared-store-bundle",requiredArtifacts:["store-android","Howland-Client-iOS-arm64.ipa"],requiredFiles:["members.json","android/Howland-Client-Android.aab","android/Howland-Client-Android.apk","ios/Howland-Client-iOS-arm64.ipa"],requiredPrefixes:[]}}' > "$RUNNER_TEMP/write.json"
+          node _platform/codestyle/ci/release/prepared-release.mjs write "$RUNNER_TEMP/write.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: prepared-store-bundle
+          path: bundle/
+          retention-days: 30
+          if-no-files-found: error
+          compression-level: 0
+
+  verified-bundle:
+    if: ${{ inputs.mode != 'prepare' && github.repository == 'ayers-software-repair/openwork' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    outputs:
+      channel: ${{ steps.identity.outputs.channel }}
+      numeric: ${{ steps.identity.outputs.numeric }}
+      ios_build: ${{ steps.identity.outputs.ios_build }}
+      stores: ${{ steps.identity.outputs.stores }}
+      enabled: ${{ steps.identity.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: ayers-software-repair/platform
+          ref: v0.76.0
+          ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
+          persist-credentials: false
+          path: _platform
+          sparse-checkout: codestyle/ci/release/
+      - uses: actions/setup-node@v7
+        with: { node-version: '24' }
+      - name: Require the exact source's successful contract run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SELECTED_TAG: howland-v${{ inputs.rc_version }}
+        run: bash scripts/release/verify-contract-ci.sh
+      - uses: actions/download-artifact@v8
+        with:
+          name: prepared-store-bundle
+          path: bundle
+          run-id: ${{ inputs.bundle_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify completed RC bundle, exact source and member bytes
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_ID: ${{ inputs.bundle_run_id }}
+          BUNDLE_ATTEMPT: ${{ inputs.bundle_attempt }}
+          RC_VERSION: ${{ inputs.rc_version }}
+          MODE: ${{ inputs.mode }}
+          PLAY_ENABLED: ${{ vars.PLAY_SUBMISSION_ENABLED }}
+          APPLE_ENABLED: ${{ vars.APPLE_SUBMISSION_ENABLED }}
+          AMAZON_ENABLED: ${{ vars.AMAZON_SUBMISSION_ENABLED }}
+          GCP_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE: ${{ vars.GCP_PLAY_SERVICE_ACCOUNT }}
+          APPLE_APP_ID: ${{ vars.APPLE_APP_ID }}
+          AMAZON_APP_ID: ${{ vars.AMAZON_APP_ID }}
+          AMAZON_APK_ID: ${{ vars.AMAZON_APK_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$BUNDLE_ID" =~ ^[1-9][0-9]*$ && "$BUNDLE_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RC_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUNDLE_ID" > "$RUNNER_TEMP/run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUNDLE_ID/artifacts?per_page=100" > "$RUNNER_TEMP/artifacts.json"
+          jq -n --arg dir bundle --arg repository "$GITHUB_REPOSITORY" \
+            --argjson run "$(cat "$RUNNER_TEMP/run.json")" \
+            --argjson artifacts "$(cat "$RUNNER_TEMP/artifacts.json")" \
+            --arg runAttempt "$BUNDLE_ATTEMPT" --arg sha "$GITHUB_SHA" --arg version "$RC_VERSION" \
+            '{dir:$dir,repository:$repository,run:$run,runAttempt:$runAttempt,sha:$sha,version:$version,artifacts:$artifacts,policy:{id:"howland-client-store-bundle",workflow:".github/workflows/store-bundle.yml",artifact:"prepared-store-bundle",requiredArtifacts:["store-android","Howland-Client-iOS-arm64.ipa"],requiredFiles:["members.json","android/Howland-Client-Android.aab","android/Howland-Client-Android.apk","ios/Howland-Client-iOS-arm64.ipa"],requiredPrefixes:[]}}' > "$RUNNER_TEMP/verify.json"
+          node _platform/codestyle/ci/release/prepared-release.mjs verify "$RUNNER_TEMP/verify.json"
+          [ "$(jq -r '.desktopAndroid.sha' bundle/members.json)" = "$GITHUB_SHA" ]
+          [ "$(jq -r '.ios.sha' bundle/members.json)" = "$GITHUB_SHA" ]
+          numeric="${RC_VERSION%-rc.*}"
+          channel=rc; [ "$MODE" = release-rc ] || channel=public
+          ios_build=$(jq -er '.ios.iosBuild | select(test("^[1-9][0-9]*$"))' bundle/members.json)
+          # Readiness is per target; missing vendor variables leave that target disabled.
+          stores=$(jq -cn --arg play "$PLAY_ENABLED" --arg apple "$APPLE_ENABLED" --arg amazon "$AMAZON_ENABLED" \
+            --arg provider "$GCP_PROVIDER" \
+            --arg service "$GCP_SERVICE" \
+            --arg appid "$APPLE_APP_ID" \
+            --arg amazonApp "$AMAZON_APP_ID" --arg amazonApk "$AMAZON_APK_ID" \
+            '{play:(if $play == "true" then [{name:"android",artifact:"store-android",package:"repair.ayers.howland",tracks:["production"],"workload-identity-provider":$provider,"service-account":$service}] else [] end),apple:(if $apple == "true" then [{name:"ios",platform:"IOS",artifact:"Howland-Client-iOS-arm64.ipa","app-id":$appid}] else [] end),amazon:(if $amazon == "true" then [{name:"android",artifact:"store-android","app-id":$amazonApp,"apk-id":$amazonApk}] else [] end)} | with_entries(select(.value | length > 0))' \
+            )
+          enabled=false
+          if jq -e 'any(.[]; length > 0)' <<< "$stores" >/dev/null; then
+            enabled=true
+          else
+            echo 'All vendor store submissions are disabled; no submission was attempted.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          {
+            echo "numeric=$numeric"
+            echo "channel=$channel"
+            echo "ios_build=$ios_build"
+            echo "stores=$stores"
+            echo "enabled=$enabled"
+          } >> "$GITHUB_OUTPUT"
+
+  store-release:
+    needs: verified-bundle
+    if: ${{ !cancelled() && needs.verified-bundle.result == 'success' && needs.verified-bundle.outputs.enabled == 'true' }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: ayers-software-repair/platform/.github/workflows/store-release.yml@v0.76.0
+    with:
+      product: howland
+      channel: ${{ needs.verified-bundle.outputs.channel }}
+      version: ${{ needs.verified-bundle.outputs.numeric }}
+      build: ${{ needs.verified-bundle.outputs.ios_build }}
+      artifact-run-id: ${{ inputs.bundle_run_id }}
+      source-run-id: ${{ inputs.bundle_run_id }}
+      release-tag: howland-v${{ needs.verified-bundle.outputs.channel == 'rc' && inputs.rc_version || needs.verified-bundle.outputs.numeric }}
+      release-repo: ayers-software-repair/howland-releases
+      stores: ${{ needs.verified-bundle.outputs.stores }}
+    secrets: inherit

@@ -17,6 +17,12 @@ prepared receipt and reuses the same desktop bytes on `ayers-software-repair/how
 Phones install from stores only and nothing side-loads (owner, D1625); vendor submissions use
 the separately verified store bundle and enabled targets.
 
+## Shared release verification, 27 October 2026
+
+Workflow references use platform v0.76.0. Preparation and publication require current
+contract CI for the exact source commit; retained receipts cannot bypass a later failure.
+Product CI and native package acceptance remain required before publication.
+
 ## The release workflows
 
 - **`release.yml`** — desktop+Android preparation. Preflight verifies the pinned sidecar,

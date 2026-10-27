@@ -59,7 +59,7 @@ test("store bundle verifies both exact source receipts before shared store submi
   assert.match(verified, /\} >> "\$GITHUB_OUTPUT"/);
   assert.match(verified, /sparse-checkout: codestyle\/ci\/release\//);
   assert.match(shared, /needs\.verified-bundle\.outputs\.enabled == 'true'/);
-  assert.match(shared, /uses: ayers-software-repair\/platform\/\.github\/workflows\/store-release\.yml@v0\.73\.0/);
+  assert.match(shared, /uses: ayers-software-repair\/platform\/\.github\/workflows\/store-release\.yml@v0\.76\.0/);
   assert.match(shared, /artifact-run-id: \$\{\{ inputs\.bundle_run_id \}\}/);
   assert.match(shared, /source-run-id: \$\{\{ inputs\.bundle_run_id \}\}/);
 });

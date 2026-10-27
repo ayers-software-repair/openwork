@@ -162,7 +162,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: ayers-software-repair/platform
-          ref: v0.73.0
+          ref: v0.76.0
           ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
           persist-credentials: false
           path: _platform
@@ -200,6 +200,12 @@ jobs:
               echo "$h=false" >> "$GITHUB_OUTPUT"
             fi
           done
+
+      - name: Require the exact source's successful contract run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SELECTED_TAG: ${{ inputs.tag || github.ref_name }}
+        run: bash scripts/release/verify-contract-ci.sh
 
       # THE DECLARATION GATES THE RUN. packaging/platforms.json states what this fork builds and
       # packaging/platforms.test.mjs holds this workflow to it in both directions. It also runs on
@@ -900,7 +906,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ayers-software-repair/platform
-          ref: v0.69.0
+          ref: v0.76.0
           ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
           persist-credentials: false
           path: _platform
@@ -1659,7 +1665,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: ayers-software-repair/platform
-          ref: v0.73.0
+          ref: v0.76.0
           ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
           persist-credentials: false
           path: _platform
@@ -1752,13 +1758,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: ayers-software-repair/platform
-          ref: v0.73.0
+          ref: v0.76.0
           ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
           persist-credentials: false
           path: _platform
           sparse-checkout: codestyle/ci/release/
       - uses: actions/setup-node@v7
         with: { node-version: '24' }
+      - name: Require the exact source's successful contract run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SELECTED_TAG: ${{ inputs.tag || github.ref_name }}
+        run: bash scripts/release/verify-contract-ci.sh
       - uses: actions/download-artifact@v8
         with:
           name: prepared-release
@@ -1810,7 +1821,7 @@ jobs:
         if: ${{ inputs.chain }}
         with:
           repository: ayers-software-repair/platform
-          ref: v0.73.0
+          ref: v0.76.0
           ssh-key: ${{ secrets.PLATFORM_READ_KEY }}
           persist-credentials: false
           path: _platform

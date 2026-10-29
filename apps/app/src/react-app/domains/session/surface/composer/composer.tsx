@@ -50,6 +50,8 @@ type MentionItem = {
 
 
 type ComposerProps = {
+  /** Keep the editor and send/stop controls without tools, attachments, or model selection. */
+  textOnly?: boolean;
   draft: string;
   mentions: Record<string, ComposerMentionKind>;
   onDraftChange: (value: string) => void;
@@ -128,6 +130,7 @@ type ComposerProps = {
 const FLUSH_PROMPT_EVENT = "openwork:flushPromptDraft";
 const FOCUS_PROMPT_EVENT = "openwork:focusPrompt";
 const DEFAULT_AGENT_NAME = "openwork";
+const EMPTY_MENTIONS: Record<string, ComposerMentionKind> = {};
 
 function isNonDefaultAgent(agent: Agent) {
   return agent.name !== DEFAULT_AGENT_NAME;
@@ -195,10 +198,12 @@ function pluginSlashCommandName(file: CloudImportedPluginFile) {
 }
 
 export const ReactSessionComposer = memo(function ReactSessionComposer(props: ComposerProps) {
+  const textOnly = props.textOnly ?? false;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const orgMcp = useOrgMcpConnections();
+  const orgMcp = useOrgMcpConnections(!textOnly);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const [agentMenuOpenState, setAgentMenuOpen] = useState(false);
+  const agentMenuOpen = !textOnly && agentMenuOpenState;
   const [refreshingOrganizationModels, setRefreshingOrganizationModels] = useState(false);
   const [commands, setCommands] = useState<SlashCommandOption[]>([]);
   const [commandsLoading, setCommandsLoading] = useState(false);
@@ -206,13 +211,16 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
   const [skills, setSkills] = useState<SkillCard[]>(props.skills ?? []);
   const [importedPlugins, setImportedPlugins] = useState<CloudImportedPlugin[]>(props.importedPlugins ?? []);
   const [pluginsLoading, setPluginsLoading] = useState(false);
-  const [slashOpen, setSlashOpen] = useState(false);
-  const [toolMenuOpen, setToolMenuOpen] = useState(false);
+  const [slashOpenState, setSlashOpen] = useState(false);
+  const slashOpen = !textOnly && slashOpenState;
+  const [toolMenuOpenState, setToolMenuOpen] = useState(false);
+  const toolMenuOpen = !textOnly && toolMenuOpenState;
   const [plusMenuQuery, setPlusMenuQuery] = useState("");
   const [workspaceFileResults, setWorkspaceFileResults] = useState<string[]>([]);
   const [mentionItems, setMentionItems] = useState<MentionItem[]>([]);
   const [activeMentionQuery, setActiveMentionQuery] = useState<string | null>(null);
-  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionOpenState, setMentionOpen] = useState(false);
+  const mentionOpen = !textOnly && mentionOpenState;
   const [menuIndex, setMenuIndex] = useState(0);
   const menuItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const commandsCacheRef = useRef<SlashCommandOption[] | null>(null);
@@ -273,10 +281,10 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
   }, [props.busy, disarmEscape]);
 
   useEffect(() => {
-    if (props.steering && props.modelPickerOpen) {
+    if (!textOnly && props.steering && props.modelPickerOpen) {
       props.onModelPickerOpenChange(false);
     }
-  }, [props.modelPickerOpen, props.onModelPickerOpenChange, props.steering]);
+  }, [textOnly, props.modelPickerOpen, props.onModelPickerOpenChange, props.steering]);
 
   const handleRefreshOrganizationModels = useCallback(async () => {
     if (!props.onRefreshOrganizationModels || refreshingOrganizationModels) return;
@@ -315,7 +323,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
   // Enter queues until the agent finishes, and Cmd/Ctrl+Enter steers.
   // An edit always replaces its original turn through the immediate send path.
   const handleEditorSubmit = useCallback((options: { queue: boolean }) => {
-    const hasContent = props.draft.trim().length > 0 || props.attachments.length > 0;
+    const hasContent = props.draft.trim().length > 0 || (!textOnly && props.attachments.length > 0);
     if (!hasContent) return;
     if (props.submissionPreparing || props.stopping) return;
     if (props.busy && !props.editing) {
@@ -324,17 +332,27 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
       return;
     }
     void props.onSend();
-  }, [props.busy, props.editing, props.draft, props.attachments, props.onSend, props.onSteer, props.onQueue, props.submissionPreparing, props.stopping]);
+  }, [textOnly, props.busy, props.editing, props.draft, props.attachments, props.onSend, props.onSteer, props.onQueue, props.submissionPreparing, props.stopping]);
 
   const showStop = props.busy && !props.editing;
 
   const slashCommandQuery = getSlashCommandQuery(props.draft);
-  const slashOpenNext = slashCommandQuery !== null;
+  const slashOpenNext = !textOnly && slashCommandQuery !== null;
   const slashQuery = slashCommandQuery ?? "";
-  const mentionOpenNext = activeMentionQuery !== null;
+  const mentionOpenNext = !textOnly && activeMentionQuery !== null;
   const mentionQuery = activeMentionQuery ?? "";
   const nonDefaultAgents = useMemo(() => agents.filter(isNonDefaultAgent), [agents]);
-  const showAgentPicker = props.selectedAgent !== null;
+  const showAgentPicker = !textOnly && props.selectedAgent !== null;
+
+  useEffect(() => {
+    if (!textOnly) return;
+    setAgentMenuOpen(false);
+    setToolMenuOpen(false);
+    setSlashOpen(false);
+    setMentionOpen(false);
+    setActiveMentionQuery(null);
+    setDropzoneActive(false);
+  }, [textOnly]);
 
   useEffect(() => {
     setSlashOpen(slashOpenNext);
@@ -356,6 +374,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
   }, [showAgentPicker]);
 
   useEffect(() => {
+    if (textOnly) return;
     let cancelled = false;
     void props.listAgents().then((next) => {
       if (!cancelled) setAgents(next);
@@ -365,7 +384,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
     return () => {
       cancelled = true;
     };
-  }, [props.listAgents]);
+  }, [textOnly, props.listAgents]);
 
   useEffect(() => {
     setSkills(props.skills ?? []);
@@ -624,10 +643,10 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
   useEffect(() => {
     const previous = connectingIdRef.current;
     connectingIdRef.current = connectingId;
-    if (!previous || connectingId) return;
+    if (textOnly || !previous || connectingId) return;
     void listMcpRef.current?.();
     void loadSessionConnectCapabilities();
-  }, [connectingId]);
+  }, [textOnly, connectingId]);
 
   useEffect(() => {
     if (!toolMenuOpen || !orgMcp.error) return;
@@ -687,7 +706,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
   );
   // Stable tokens keep streaming renders from re-running Lexical's draft sync.
   const attachmentTokens = useMemo<ComposerAttachmentToken[]>(
-    () => props.attachments.map((attachment) => ({
+    () => textOnly ? [] : props.attachments.map((attachment) => ({
       id: attachment.id,
       name: attachment.name,
       kind: isImageAttachment(attachment) ? "image" : "file",
@@ -695,7 +714,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
       mime: attachment.mimeType,
       bytes: attachment.size,
     })),
-    [props.attachments],
+    [textOnly, props.attachments],
   );
 
   const handleExpandPastedText = useCallback((label: string) => {
@@ -765,7 +784,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
     () => [...new Set([...props.recentFiles, ...workspaceFileResults])],
     [props.recentFiles, workspaceFileResults],
   );
-  const canSend = props.draft.trim().length > 0 || props.attachments.length > 0;
+  const canSend = props.draft.trim().length > 0 || (!textOnly && props.attachments.length > 0);
   const diagnosticsRef = useRef<ConnectionDiagnosticSource | null>(null);
   useEffect(() => {
     const diagnostics = connectionDiagnosticHistory.createSource();
@@ -901,6 +920,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
 
 
   const openFilePicker = () => {
+    if (textOnly) return;
     if (!props.attachmentsEnabled) {
       toast.warning(props.attachmentsDisabledReason ?? t("composer.attachments_unavailable"));
       return;
@@ -1035,7 +1055,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
     // Escape-to-stop while the agent is busy. Only when no menu is open so
     // Escape can still close menus. First press arms a confirmation prompt
     // for 3s; a second Escape within that window stops the agent.
-    const anyMenuOpen = agentMenuOpen || toolMenuOpen || props.modelPickerOpen || Boolean(activeMenu);
+    const anyMenuOpen = agentMenuOpen || toolMenuOpen || (!textOnly && props.modelPickerOpen) || Boolean(activeMenu);
     if (event.key === "Escape" && props.busy && !anyMenuOpen) {
       event.preventDefault();
       if (props.stopping) return;
@@ -1170,6 +1190,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
   }, [props.attachmentsUploading, props.attachments]);
 
   const addAttachments = async (inputFiles: File[]) => {
+    if (textOnly) return;
     if (!inputFiles.length) return;
     if (!props.attachmentsEnabled) {
       toast.warning(props.attachmentsDisabledReason ?? t("composer.attachments_unavailable"));
@@ -1324,7 +1345,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
             removes it with backspace like any other inline token.
           */}
 
-          {dropzoneActive ? (
+          {!textOnly && dropzoneActive ? (
             <div className="pointer-events-none absolute inset-3 z-20 flex items-center justify-center rounded-[20px] border-2 border-dashed border-dls-accent bg-[color:color-mix(in_oklab,var(--dls-accent)_10%,transparent)]">
               <div className="rounded-2xl border border-dls-border bg-dls-surface/95 px-5 py-4 text-center backdrop-blur-sm">
                 <div className="text-sm font-medium text-dls-text">{t("composer.attach_files")}</div>
@@ -1338,18 +1359,18 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
             <LexicalPromptEditor
               ref={editorRef}
               value={props.draft}
-              mentions={props.mentions}
+              mentions={textOnly ? EMPTY_MENTIONS : props.mentions}
               pastedText={pastedTextTokens}
               attachments={attachmentTokens}
               submitDisabled={props.disabled}
               placeholder={t("composer.placeholder")}
               onChange={props.onDraftChange}
-              onMentionQueryChange={setActiveMentionQuery}
+              onMentionQueryChange={textOnly ? undefined : setActiveMentionQuery}
               onSubmit={handleEditorSubmit}
               onExpandPastedText={handleExpandPastedText}
-              onExpandAttachment={setExpandedAttachmentId}
-              onRemoveAttachment={props.onRemoveAttachment}
-              onPasteText={props.onPasteText}
+              onExpandAttachment={textOnly ? undefined : setExpandedAttachmentId}
+              onRemoveAttachment={textOnly ? undefined : props.onRemoveAttachment}
+              onPasteText={textOnly ? undefined : props.onPasteText}
               onPaste={(event) => {
                 // Paste policy:
                 // 1. Actual files on the clipboard -> attach them.
@@ -1366,6 +1387,8 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
                   void addAttachments(files);
                   return;
                 }
+
+                if (textOnly) return;
 
                 const uriList = event.clipboardData
                   ? parseClipboardUriList(event.clipboardData)
@@ -1386,7 +1409,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
               onDragOver={(event) => {
                 if (event.dataTransfer?.files?.length) {
                   event.preventDefault();
-                  if (!dropzoneActive) setDropzoneActive(true);
+                  if (!textOnly && !dropzoneActive) setDropzoneActive(true);
                 }
               }}
               onDragLeave={(event) => {
@@ -1410,7 +1433,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
               </div>
             ) : null}
             <div data-composer-toolbar className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-1.5 gap-y-2 max-lg:flex @min-[560px]/composer:flex">
-              <div className="contents">
+              {!textOnly && <div className="contents">
                 <div className="col-start-1 row-start-2 flex shrink-0 items-center gap-1.5">
                 <input
                   ref={fileInputRef}
@@ -1566,7 +1589,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
                 {props.contextControl}
                 </div>
 
-              </div>
+              </div>}
 
               {/*
                 Action area: one circular control.
@@ -1649,7 +1672,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
       </div>
     </div>
     {/* Sibling of the composer root so Escape closes the lightbox without arming stop. */}
-    {expandedAttachment?.previewUrl ? (
+    {!textOnly && expandedAttachment?.previewUrl ? (
       <ImageLightbox
         src={expandedAttachment.previewUrl}
         alt={expandedAttachment.name}

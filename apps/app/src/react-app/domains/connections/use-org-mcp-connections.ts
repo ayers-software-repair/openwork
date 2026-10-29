@@ -133,10 +133,12 @@ export function resolveOrgMcpConnectionCardState(
  * or My Extensions; they execute through Den's `search_capabilities` /
  * `execute_capability` surface, not local per-workspace `mcpServers` entries.
  */
-export function useOrgMcpConnections() {
+export function useOrgMcpConnections(enabled = true) {
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   // Settings remounts every time the extensions panel opens, so start from
   // whatever the app already fetched instead of an empty list.
-  const prefetched = readCloudInventoryScope();
+  const prefetched = enabled ? readCloudInventoryScope() : null;
   const [connections, setConnectionsState] = useState<DenExternalMcpConnection[]>(
     () => (prefetched ? readCachedOrgMcpConnections(prefetched) ?? [] : []),
   );
@@ -146,7 +148,7 @@ export function useOrgMcpConnections() {
     setConnectionsState(nextConnections);
   }, []);
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(connections.length > 0);
+  const [loaded, setLoaded] = useState(!enabled || connections.length > 0);
   const [error, setError] = useState<string | null>(null);
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
@@ -163,6 +165,7 @@ export function useOrgMcpConnections() {
   }, []);
 
   const isActionScopeCurrent = useCallback((scope: OrgMcpPollScope) => {
+    if (!enabledRef.current) return false;
     const activeOrganizationId = readDenSettings().activeOrgId?.trim() ?? "";
     return isOrgMcpPollScopeCurrent(
       scope,
@@ -172,6 +175,7 @@ export function useOrgMcpConnections() {
   }, []);
 
   const refresh = useCallback(async (expectedScope?: OrgMcpPollScope) => {
+    if (!enabledRef.current) return;
     const run = refreshRunRef.current + 1;
     refreshRunRef.current = run;
     const settings = readDenSettings();
@@ -195,19 +199,19 @@ export function useOrgMcpConnections() {
         maxAgeMs: 0,
       });
       if (
-        refreshRunRef.current !== run
+        !enabledRef.current || refreshRunRef.current !== run
         || (expectedScope && !isActionScopeCurrent(expectedScope))
       ) return;
       setConnections(result);
     } catch (fetchError) {
       if (
-        refreshRunRef.current !== run
+        !enabledRef.current || refreshRunRef.current !== run
         || (expectedScope && !isActionScopeCurrent(expectedScope))
       ) return;
       setError(fetchError instanceof Error ? fetchError.message : "Failed to load organization MCP connections.");
     } finally {
       if (
-        refreshRunRef.current === run
+        enabledRef.current && refreshRunRef.current === run
         && (!expectedScope || isActionScopeCurrent(expectedScope))
       ) {
         setLoading(false);
@@ -217,6 +221,7 @@ export function useOrgMcpConnections() {
   }, [isActionScopeCurrent, setConnections]);
 
   const connect = useCallback(async (connectionId: string, options?: { forceFreshAuthorization?: boolean }) => {
+    if (!enabledRef.current) return;
     const settings = readDenSettings();
     const token = settings.authToken?.trim() ?? "";
     const orgId = settings.activeOrgId?.trim() ?? "";
@@ -314,6 +319,7 @@ export function useOrgMcpConnections() {
   }, [isActionScopeCurrent, refresh, setConnections, stopPolling]);
 
   const disconnect = useCallback(async (connectionId: string) => {
+    if (!enabledRef.current) return;
     const settings = readDenSettings();
     const token = settings.authToken?.trim() ?? "";
     const orgId = settings.activeOrgId?.trim() ?? "";
@@ -343,6 +349,15 @@ export function useOrgMcpConnections() {
   }, [isActionScopeCurrent, refresh, stopPolling]);
 
   useEffect(() => {
+    if (!enabled) {
+      setConnections([]);
+      setError(null);
+      setLoading(false);
+      setLoaded(true);
+      setConnectingId(null);
+      setDisconnectingId(null);
+      return;
+    }
     void refresh();
     const handleSettingsChanged = () => {
       stopPolling();
@@ -359,7 +374,15 @@ export function useOrgMcpConnections() {
       stopPolling();
       window.removeEventListener(denSettingsChangedEvent, handleSettingsChanged);
     };
-  }, [refresh, setConnections, stopPolling]);
+  }, [enabled, refresh, setConnections, stopPolling]);
 
-  return { connections, loading, loaded, error, connectingId, disconnectingId, refresh, connect, disconnect };
+  return {
+    connections: enabled ? connections : [],
+    loading: enabled && loading,
+    loaded: !enabled || loaded,
+    error: enabled ? error : null,
+    connectingId: enabled ? connectingId : null,
+    disconnectingId: enabled ? disconnectingId : null,
+    refresh, connect, disconnect,
+  };
 }

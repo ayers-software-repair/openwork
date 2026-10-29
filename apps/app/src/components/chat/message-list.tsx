@@ -900,13 +900,11 @@ const UserMessage = React.memo(
     )
     const hasContent = inlineParts.length > 0
     const menuActions: MenuAction[] = []
-    if (messageText) menuActions.push(
-      { type: "item", id: "edit", label: "Edit message", icon: <Pencil className="size-4" />, disabled: readOnly || Boolean(wall), onSelect: () => onEditUserMessage(message.id, messageText) },
-      { type: "item", id: "copy", label: "Copy", icon: <Copy className="size-4" />, onSelect: () => navigator.clipboard.writeText(messageText) },
-    )
-    if (!wall) menuActions.push(
+    if (messageText && !readOnly) menuActions.push({ type: "item", id: "edit", label: "Edit message", icon: <Pencil className="size-4" />, disabled: Boolean(wall), onSelect: () => onEditUserMessage(message.id, messageText) })
+    if (messageText) menuActions.push({ type: "item", id: "copy", label: "Copy", icon: <Copy className="size-4" />, onSelect: () => navigator.clipboard.writeText(messageText) })
+    if (!wall && !readOnly) menuActions.push(
       { type: "item", id: "branch", label: branching ? "Branching..." : "Branch in new chat", icon: <Split className="size-4 rotate-90" />, disabled: Boolean(forkingMessageId), onSelect: () => onForkAtMessage(message.id) },
-      { type: "item", id: "revert", label: "Revert", icon: <Undo2 className="size-4" />, disabled: readOnly, onSelect: () => onRevertToUserMessage(message.id) },
+      { type: "item", id: "revert", label: "Revert", icon: <Undo2 className="size-4" />, onSelect: () => onRevertToUserMessage(message.id) },
     )
 
     return (
@@ -976,13 +974,13 @@ const UserMessage = React.memo(
                   >
                     <MessageTimestamp message={message} className="mr-1.5" />
                     <CopyMessageButton messages={[message]} />
+                    {!readOnly && <>
                     {messageText ? (
                       <MessageAction tooltip="Edit message">
                         <Button
                           variant="ghost"
                           size="icon"
                           aria-label="Edit message"
-                          disabled={readOnly}
                           onClick={() => onEditUserMessage(message.id, messageText)}
                         >
                           <Pencil />
@@ -1007,12 +1005,12 @@ const UserMessage = React.memo(
                         variant="ghost"
                         size="icon"
                         aria-label="Revert"
-                        disabled={readOnly}
                         onClick={() => onRevertToUserMessage(message.id)}
                       >
                         <Undo2 />
                       </Button>
                     </MessageAction>
+                    </>}
                   </MessageActions>
                 )}
               </div>
@@ -1583,7 +1581,7 @@ function MessageGroup({
         <div className={cn("mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 px-2 transition-opacity duration-150 group-hover/message-group:opacity-100 max-lg:opacity-100 pointer-coarse:opacity-100 md:px-8", forkingMessageId && forkingMessageId === lastRealItem?.message.id ? "opacity-100" : "opacity-0")}>
           <MessageActions className="flex gap-0">
             <CopyMessageButton messages={renderableItems.map((item) => item.message)} />
-            {lastRealItem ? (
+            {lastRealItem && !readOnly ? (
               <>
                 <MessageAction tooltip={forkingMessageId === lastRealItem.message.id ? "Branching..." : "Branch in new chat"}>
                   <Button
@@ -1603,7 +1601,6 @@ function MessageGroup({
                     variant="ghost"
                     size="icon"
                     aria-label="Revert"
-                    disabled={readOnly}
                     onClick={() => onRevertToUserMessage(lastRealItem.message.id)}
                   >
                     <Undo2 />

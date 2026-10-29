@@ -9,6 +9,7 @@ on:
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
       - package.json
+      - constants.json
       - .github/workflows/demo-checks.yml
   pull_request:
     branches: [howland]

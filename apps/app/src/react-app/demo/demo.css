@@ -47,3 +47,5 @@
 .howland-demo-status { margin: 0; padding-inline: 24px; color: var(--color-dls-text); }
 .howland-demo-status:not(:empty) { padding-block: 12px; }
 @media(max-width: 600px) { .howland-demo-head { padding: 10px 12px; gap: 8px; } .howland-demo-brand { font-size: 18px; } .howland-demo-brand img { width: 30px; height: 30px; } .howland-demo-actions { gap: 4px; } .howland-demo-transcript { padding: 16px; } .howland-demo-compose { padding-inline: 12px; } }
+
+@media(max-width: 380px) { .howland-demo-head { flex-wrap: wrap; } .howland-demo-actions { width: 100%; justify-content: space-between; } }

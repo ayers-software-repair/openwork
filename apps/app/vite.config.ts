@@ -132,7 +132,7 @@ export default defineConfig(({ command, isPreview }) => {
       },
     },
     build: {
-      ...(isPublicDemo ? { outDir: "dist-demo" } : {}),
+      ...(isPublicDemo ? { outDir: "dist-demo", assetsInlineLimit: 0 } : {}),
       target: "esnext",
       rollupOptions: {
         input: {

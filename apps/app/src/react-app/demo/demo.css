@@ -1,9 +1,41 @@
 /* Copyright Ayers Electronics Inc. All rights reserved. */
+
+/* The report portal mounts on document.body, outside the demo main element. */
+:root {
+  --chat-surface: var(--dls-canvas);
+  --chat-panel: var(--dls-surface);
+  --chat-raised: var(--dls-surface-muted);
+  --chat-border: var(--dls-border);
+  --chat-border-soft: var(--dls-border);
+  --chat-text: var(--dls-text-primary);
+  --chat-muted: var(--dls-text-secondary);
+  --chat-accent: var(--dls-accent);
+  --chat-accent-text: var(--dls-text-primary);
+  --chat-on-accent: var(--dls-accent-fg);
+  --chat-selected: var(--dls-active);
+  --chat-radius-1: calc(var(--radius) * 0.6);
+  --chat-radius-2: var(--radius);
+  --chat-radius-3: var(--dls-radius);
+  --chat-radius-pill: 9999px;
+  --chat-space-1: 4px;
+  --chat-space-2: 8px;
+  --chat-space-3: 12px;
+  --chat-space-4: 16px;
+  --chat-space-5: 24px;
+  --chat-type-micro: 0.75rem;
+  --chat-type-label: 0.875rem;
+  --chat-type-body: 1rem;
+  --chat-type-heading: 1.375rem;
+  --chat-focus-ring: 0 0 0 2px var(--dls-text-primary);
+  --chat-target-min: 44px;
+  --chat-ease: 150ms ease-out;
+}
 .howland-demo { height: 100dvh; min-height: 360px; display: flex; flex-direction: column; background: var(--color-dls-surface); }
 .howland-demo-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 24px; border-bottom: 1px solid var(--color-dls-border); }
 .howland-demo-brand { display: inline-flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 600; }
 .howland-demo-brand img { object-fit: contain; }
 .howland-demo-actions { display: flex; align-items: center; gap: 8px; }
+.howland-demo-actions > button, .howland-demo-actions > a { min-width: var(--chat-target-min); min-height: var(--chat-target-min); }
 .howland-demo-conversation { flex: 1; min-height: 0; display: flex; flex-direction: column; width: min(100%, 900px); margin-inline: auto; }
 .howland-demo-consent { margin: auto; padding: 24px; max-width: 640px; }
 .howland-demo-transcript { flex: 1; min-height: 0; overflow-y: auto; padding: 24px; overscroll-behavior: contain; }

@@ -77,7 +77,7 @@ export function DemoApp() {
     let starting = false;
     const mounted = kit.mountConsent(consent.current, {
       words: { title: "Try Howland with Claude",
-        body: "Use Howland's OpenWork conversation interface to plan, draft, or ask about code. This public demo sends your messages to Anthropic's Claude. Do not enter personal information. It cannot access your files, run commands, or connect accounts. Your conversation is temporary. Howland, FERMI and Magpie share the demo question limit.",
+        body: "Use Howland's OpenWork conversation interface to plan, draft, or ask about code. This public demo sends your messages to Anthropic's Claude. Do not enter personal information. It cannot access your files, run commands, or connect accounts. Your conversation is temporary. Question limits apply to this demo.",
         accept: "Start conversation", decline: "Read the Howland guide" },
       async onAccept() {
         if (starting) return;

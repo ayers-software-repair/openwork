@@ -95,3 +95,7 @@ Product CI and native package acceptance remain required before publication.
   time); the first funded run verifies it.
 - The mac sidecar binaries must be listed for signing in electron-builder.yml before
   notarization is enabled — inert and untestable while unsigned (also in READINESS).
+
+## Public demo mobile consent, 30 October 2026
+
+The owned mobile consent wrapper removes its redundant outer padding below 600px. The shared consent keeps its 16px inner padding, complete wording, typography and 44px controls. Actual staged 320x568 browser diagnosis reproduced the clipped secondary choice, passed with this single rule, and reproduced the failure after removing it; no visitor, model or report requests occurred. Existing hosted public-demo checks validate the application and build. Product releases and native inputs are unchanged.

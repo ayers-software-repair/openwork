@@ -35,7 +35,8 @@ const initial = { mode: "work", filename: "proposal.md", source: "sample proposa
   revision: "original", checks: [], changes: [], preview: `/demo/preview/${"a".repeat(48)}`,
   originalPreview: `/demo/preview/${"a".repeat(48)}`, revisions: [] };
 
-test("real demo mounts consent, leased Work and Code, shared smooth chat and selected-answer report review", async () => {
+test.each([true, false])("mounted demo preserves terminal acceptance and mode recovery: completed=%s", async complete => {
+  mountConsent.mockClear(); mountChat.mockClear(); mountReport.mockClear();
   // Happy DOM reports its deliberately disabled iframe load; real preview behavior is browser-tested.
   const browserLogs: unknown[][] = [];
   const browserConsole = spyOn(globalThis.console, "error").mockImplementation((...values: unknown[]) => { browserLogs.push(values); });
@@ -64,8 +65,10 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
         time: { created: 1, ...(role === "assistant" ? { completed: 2 } : {}) },
         ...(role === "assistant" ? { parentID: userID, finish: "stop" } : {}) },
         parts: [{ id: `prt_${"3".repeat(12)}${(role === "user" ? "U" : "A").repeat(14)}`, sessionID, messageID: id, type: "text", text }] });
+      if (!complete) actual = { ...actual, revision: "a".repeat(12), source: "Unconfirmed update", preview: `/demo/preview/${"b".repeat(48)}` };
       return new Response(JSON.stringify({ type: "snapshot", messages: [entry(userID, "user", "selected question"),
-        entry(answerID, "assistant", "selected answer")] }) + "\n" + JSON.stringify({ type: "done" }) + "\n");
+        entry(answerID, "assistant", "selected answer")] }) + "\n" + JSON.stringify(complete
+          ? { type: "done" } : { type: "workspace", workspace: actual }) + "\n");
     }
     if (path === "/demo/close") return Response.json({ closed: true });
     throw new Error("Unexpected request: " + path);
@@ -96,9 +99,17 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
     expect(activeHost().store.getSnapshot().suggestions[0]?.prompt).toContain("mobile menu");
     await act(async () => { activeHost().onReport({ question: "selected question", answer: "selected answer" }); });
     expect(mountReport.mock.calls).toHaveLength(0);
-    await act(async () => { await activeHost().onNew({ content: [{ type: "text", text: "selected question" }] }); });
+    await act(async () => {
+      const sent = activeHost().onNew({ content: [{ type: "text", text: "selected question" }] });
+      if (complete) await sent; else await expect(sent).rejects.toThrow();
+    });
     await act(async () => { activeHost().onReport({ question: "selected question", answer: "selected answer" }); });
-    expect(mountReport.mock.calls[0]?.[1].draft).toEqual({ question: "selected question", answer: "selected answer", note: "" });
+    if (complete) expect(mountReport.mock.calls[0]?.[1].draft).toEqual({ question: "selected question", answer: "selected answer", note: "" });
+    else {
+      expect(mountReport.mock.calls).toHaveLength(0);
+      expect(container.querySelector("iframe")?.getAttribute("src")).toBe(initial.preview);
+      expect(calls.filter(call => call.path === "/demo/workspace")).toHaveLength(2);
+    }
     expect(calls.some(call => call.path === "/demo/reports")).toBe(false);
   } finally {
     await act(async () => { root.unmount(); for (let i = 0; i < 20; i++) await Promise.resolve(); });

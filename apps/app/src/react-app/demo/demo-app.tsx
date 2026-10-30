@@ -86,7 +86,6 @@ export function DemoApp() {
     }); }
     catch (cause) {
       if (current === version.current && !controller.signal.aborted) {
-        try { const actual = await client.workspace(); if (current === version.current) setWorkspace(actual); } catch {}
         setError(cause instanceof Error ? cause.message : "The request could not be completed.");
       }
       throw cause;

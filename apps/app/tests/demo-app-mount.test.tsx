@@ -84,7 +84,7 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
     expect(calls.some(call => call.path === "/demo/prompt")).toBe(false);
     expect(activeHost().store.getSnapshot().suggestions[0]?.prompt).toContain("mobile menu");
     await act(async () => { activeHost().onReport({ question: "selected question", answer: "selected answer" }); });
-    expect(mountReport.mock.calls[0]?.[1].draft).toEqual({ question: "selected question", answer: "selected answer", note: "" });
+    expect(mountReport.mock.calls).toHaveLength(0);
     expect(calls.some(call => call.path === "/demo/reports")).toBe(false);
   } finally {
     await act(async () => { root.unmount(); for (let i = 0; i < 20; i++) await Promise.resolve(); });
@@ -94,4 +94,25 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
   expect(browserLogs.length).toBe(1);
   expect(browserLogs.every(values => values.map(String).join(" ").includes("Iframe page loading is disabled"))).toBe(true);
   expect(calls.at(-1)).toEqual({ path: "/demo/close", method: "POST" });
+});
+
+
+test("shared chat labels partials and only opens reports for positively completed answers", async () => {
+  const { SharedConversation } = await import("../src/react-app/demo/demo-chat");
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container); const report = mock(() => {});
+  const question = { info: { id: "user", sessionID: "session", role: "user" as const, time: { created: 1 } }, parts: [{ id: "p1", sessionID: "session", messageID: "user", type: "text" as const, text: "Question" }] };
+  const answer = { info: { id: "answer", sessionID: "session", parentID: "user", role: "assistant" as const, time: { created: 2, completed: 3 }, finish: "stop" }, parts: [{ id: "p2", sessionID: "session", messageID: "answer", type: "text" as const, text: "Safe answer" }] };
+  try {
+    for (const failure of ["filtered", "interrupted", undefined] as const) {
+      await act(async () => { root.render(<SharedConversation kit={{ mountChat, mountConsent, mountReport }}
+        messages={[question, { ...answer, info: { ...answer.info, failure } }]} busy={false} disabled={false} epoch={1}
+        suggestions={[]} send={async () => {}} stop={async () => {}} report={report} />); });
+      const status = activeHost().store.getSnapshot().messages[1].status;
+      expect(status?.type).toBe(failure ? "incomplete" : "complete");
+      if (failure) expect(status?.error).toContain(failure === "filtered" ? "filtered" : "interrupted");
+      activeHost().onReport({ question: "Question", answer: "Safe answer" });
+      expect(report.mock.calls.length).toBe(failure ? 0 : 1);
+    }
+  } finally { await act(async () => root.unmount()); container.remove(); }
 });

@@ -4,7 +4,7 @@ import * as React from "react";
 import type { DemoMessage, DemoReportDraft, DemoReportReceipt } from "./demo-client";
 
 type Mount = { unmount(): void };
-type ChatMessage = { id: string; role: "user" | "assistant"; content: string; createdAt: Date };
+type ChatMessage = { id: string; role: "user" | "assistant"; content: string; createdAt: Date; status?: { type: "running" | "complete" | "incomplete"; reason?: string; error?: string } };
 type ChatState = { messages: ChatMessage[]; isRunning: boolean; isDisabled: boolean;
   isSendDisabled: boolean; threadId: string; suggestions: { prompt: string }[] };
 type NewMessage = { content?: readonly { type?: string; text?: string }[] };
@@ -31,11 +31,20 @@ export function SharedConversation({ kit, messages, busy, disabled, epoch, sugge
     send(text: string): Promise<void>; stop(): Promise<void>; report(draft: { question: string; answer: string }): void }) {
   const element = React.useRef<HTMLDivElement>(null);
   const [store] = React.useState(createStore);
-  const actions = React.useRef({ send, stop, report });
-  actions.current = { send, stop, report };
+  const actions = React.useRef({ send, stop, report, messages });
+  actions.current = { send, stop, report, messages };
   React.useEffect(() => {
     store.set({ messages: messages.map(message => ({ id: message.info.id, role: message.info.role,
-      content: message.parts.map(part => part.text).join(""), createdAt: new Date(message.info.time.created) })),
+      content: message.parts.map(part => part.text).join(""), createdAt: new Date(message.info.time.created),
+      ...(message.info.role === "assistant" ? { status: message.info.failure ? {
+        type: "incomplete" as const, reason: "error", error: message.info.failure === "filtered"
+          ? "This partial response was filtered. It was not completed."
+          : "This response was interrupted. The partial text is not a completed answer.",
+      } : message.info.finish === "stop" && message.info.time.completed !== undefined ? {
+        type: "complete" as const, reason: "stop",
+      } : busy ? { type: "running" as const } : {
+        type: "incomplete" as const, reason: "error", error: "This response was interrupted. The partial text is not a completed answer.",
+      } } : {}) })),
       isRunning: busy, isDisabled: disabled, isSendDisabled: busy, threadId: `sample-${epoch}`,
       suggestions: messages.length ? [] : suggestions.map(prompt => ({ prompt })) });
   }, [store, messages, busy, disabled, epoch, suggestions]);
@@ -54,7 +63,14 @@ export function SharedConversation({ kit, messages, busy, disabled, epoch, sugge
         throw new Error("This sample accepts text requests only.");
       await actions.current.send(message.content.map(part => part.text).join(""));
     }, onCancel: () => actions.current.stop(), onCopy: text => navigator.clipboard.writeText(text),
-    onReport: draft => actions.current.report(draft) }, element.current);
+    onReport: draft => {
+      const history = actions.current.messages;
+      const text = (message: DemoMessage) => message.parts.map(part => part.text).join("");
+      if (history.some(message => message.info.role === "assistant" && !message.info.failure
+        && message.info.finish === "stop" && message.info.time.completed !== undefined && text(message) === draft.answer
+        && history.some(user => user.info.id === message.info.parentID && user.info.role === "user" && text(user) === draft.question)))
+        actions.current.report(draft);
+    } }, element.current);
     return () => mount.unmount();
   }, [kit, store]);
   return <div className="howland-demo-chat" ref={element} />;

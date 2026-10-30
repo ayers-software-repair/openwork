@@ -172,18 +172,18 @@ export function DemoApp() {
   return <main className="howland-demo">
     <header className="howland-demo-head">
       <a className="howland-demo-brand" href="https://howland.si/" aria-label="Howland home"><img src="/howland-mark.webp" alt="" width="40" height="40" />Howland</a>
-      <div className="howland-demo-actions"><Button variant="outline" onClick={restart} disabled={!active || busy || stopping}>New conversation</Button><Button render={<a href="https://howland.si/downloads.html" />}>Get Howland</Button></div>
+      <div className="howland-demo-actions"><Button variant="outline" onClick={restart} disabled={!active || busy || stopping}>New conversation</Button><Button nativeButton={false} render={<a href="https://howland.si/downloads.html" />}>Get Howland</Button></div>
     </header>
     <section className="howland-demo-conversation" aria-label="Conversation with Howland">
       {!active ? <div className="howland-demo-consent" ref={consent} /> : <>
         <div className="howland-demo-transcript" ref={transcript}>
           {!messages.length && <div className="howland-demo-empty"><h1>What would you like to work on?</h1><div>{examples.map(text => <Button key={text} variant="outline" onClick={() => editDraft(text)}>{text}</Button>)}</div></div>}
-          <MessageListProvider readOnly workspaceId="public-demo" sessionId={`conversation-${epoch}`} uiStateOwner={null}
+          {uiMessages.length > 0 && <MessageListProvider readOnly workspaceId="public-demo" sessionId={`conversation-${epoch}`} uiStateOwner={null}
             showThinking={false} developerMode={false} displaySuggestions={false} providerConnectedCount={0}
             dispatchAction={noAction} setPrompt={editDraft} onRevertToUserMessage={noAction} onForkAtMessage={noAction}
             onEditUserMessage={noAction} onMcpReconnect={unavailable} onMcpReopenAuthorization={unavailable}>
             <MessageList messages={uiMessages} status={busy ? "streaming" : "ready"} activityStatus={busy ? "responding" : "idle"} />
-          </MessageListProvider>
+          </MessageListProvider>}
         </div>
         <div className="howland-demo-compose">
           <ReactSessionComposer textOnly flush draft={draft} mentions={{}} onDraftChange={editDraft} onSend={send} onSteer={noAction} onQueue={noAction} onStop={stop}

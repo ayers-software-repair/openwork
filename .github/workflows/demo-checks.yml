@@ -46,6 +46,7 @@ jobs:
         working-directory: apps/app
         run: |
           bun test tests/demo-client.test.ts
+          bun test tests/demo-app-mount.test.tsx
           bun test tests/composer-text-only.test.tsx
           bun test tests/org-mcp-disabled.test.tsx
           bun test tests/message-list-read-only.test.tsx

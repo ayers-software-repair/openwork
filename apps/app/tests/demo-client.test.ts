@@ -1,7 +1,7 @@
 // Copyright Ayers Electronics Inc. All rights reserved.
 
 import { afterEach, expect, jest, test } from "bun:test";
-import { createDemoClient, type DemoMessage, type DemoReportDraft } from "../src/react-app/demo/demo-client";
+import { createDemoClient, type DemoMessage, type DemoReportDraft, type DemoWorkspace } from "../src/react-app/demo/demo-client";
 
 afterEach(() => jest.useRealTimers());
 const stamp = Date.parse("2026-10-28T12:00:00Z");
@@ -71,8 +71,9 @@ test("split NDJSON retains only typed text messages and requires done", async ()
   f.setHandler(async () => response(frame.slice(0, 22), frame.slice(22), done));
   const seen: DemoMessage[][] = [];
   await f.client.send("Question", (messages) => seen.push(messages));
-  expect(seen).toHaveLength(1);
-  expect(seen[0][0]).toEqual({ info: { id: messageID, sessionID, role: "assistant",
+  expect(seen).toHaveLength(2);
+  expect(seen[0][0].info.time.completed).toBeUndefined();
+  expect(seen[1][0]).toEqual({ info: { id: messageID, sessionID, role: "assistant",
     parentID: identifier("msg", "B"), time: { created: 1, completed: 2 }, finish: "stop" },
     parts: [{ id: partID, sessionID, messageID, type: "text", text: "Café" }] });
   expect(new Headers(f.calls[1].init.headers).get("X-Demo-Session")).toBe(token);
@@ -129,7 +130,7 @@ test("reset prevents a delayed consent response replacing a newer token", async 
   await f.client.accept();
   pending.complete(grant());
   await flush();
-  f.setHandler(async () => response(done));
+  f.setHandler(async () => response(snapshot(), done));
   await f.client.send("Question", () => {});
   expect(new Headers(f.calls.at(-1)?.init.headers).get("X-Demo-Session")).toBe("B".repeat(64));
   f.client.reset();
@@ -185,10 +186,10 @@ test("accepts legitimate multi-snapshot streams larger than one MiB", async () =
   });
   let received = 0;
   await f.client.send("Question", (items) => {
-    expect(items[0].parts[0].text.startsWith(`${received}:`)).toBe(true);
+    expect(items[0].parts[0].text.startsWith(`${Math.min(received, 11)}:`)).toBe(true);
     received++;
   });
-  expect(received).toBe(12);
+  expect(received).toBe(13);
   expect(f.calls).toHaveLength(2);
   f.client.reset();
 });
@@ -214,7 +215,7 @@ test("enforces the 80 MiB streamed total without an advertised length", async ()
   })));
   let received = 0;
   await expect(f.client.send("Question", () => { received++; })).rejects.toThrow();
-  expect(received).toBe(allowed);
+  expect(received).toBe(allowed + 1); // Last notification marks the retained text interrupted.
   expect(f.calls).toHaveLength(2);
   f.client.reset();
 });
@@ -313,4 +314,32 @@ test("failed close keeps the lease for an explicit retry and never opens a repla
   f.setHandler(async () => Response.json({ closed: true }));
   await f.client.close();
   expect(f.client.ready).toBe(false);
+});
+
+
+test.each(["filtered", "interrupted"] as const)("%s partial never commits a pending workspace or completed answer", async reason => {
+  const f = fixture(); await f.client.accept();
+  const seen: DemoMessage[][] = [], applied: DemoWorkspace[] = [];
+  f.setHandler(async () => response(snapshot("Safe partial"), JSON.stringify({ type: "workspace", workspace }) + "\n",
+    JSON.stringify({ type: "interrupted", reason }) + "\n"));
+  await expect(f.client.send("Question", value => seen.push(value), undefined, { workspace: value => applied.push(value), error() {} })).rejects.toThrow();
+  expect(seen[0][0].info.time.completed).toBeUndefined();
+  expect(seen.at(-1)?.[0].info.failure).toBe(reason);
+  expect(seen.at(-1)?.[0].parts[0].text).toBe("Safe partial");
+  expect(applied).toEqual([]); expect(f.calls).toHaveLength(2);
+  f.client.reset();
+});
+
+test("EOF and nonaccepted finish cannot complete an answer even if its text looks complete", async () => {
+  for (const finish of ["length", "content-filter", "unknown"]) {
+    const f = fixture(); await f.client.accept(); const seen: DemoMessage[][] = [];
+    const raw = message("Safe partial"); raw.info.finish = finish;
+    f.setHandler(async () => response(JSON.stringify({ type: "snapshot", messages: [raw] }) + "\n", done));
+    await expect(f.client.send("Question", value => seen.push(value))).rejects.toThrow();
+    expect(seen.at(-1)?.[0].info.failure).toBe("interrupted"); expect(f.calls).toHaveLength(2); f.client.reset();
+  }
+  const f = fixture(); await f.client.accept(); const seen: DemoMessage[][] = [];
+  f.setHandler(async () => response(snapshot("Safe partial")));
+  await expect(f.client.send("Question", value => seen.push(value))).rejects.toThrow();
+  expect(seen.at(-1)?.[0].info.failure).toBe("interrupted"); expect(f.calls).toHaveLength(2); f.client.reset();
 });

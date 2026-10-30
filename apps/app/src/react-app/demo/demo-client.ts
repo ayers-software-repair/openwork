@@ -2,7 +2,7 @@
 
 export type DemoMessage = {
   info: { id: string; sessionID: string; role: "user" | "assistant";
-    time: { created: number; completed?: number }; parentID?: string; finish?: string };
+    time: { created: number; completed?: number }; parentID?: string; finish?: string; failure?: "filtered" | "interrupted" };
   parts: { id: string; sessionID: string; messageID: string; type: "text"; text: string;
     time?: { start: number; end?: number } }[];
 };
@@ -74,6 +74,10 @@ function messages(value: unknown): DemoMessage[] {
     if (source.finish !== undefined) {
       requireValue(typeof source.finish === "string" && FINISH.has(source.finish));
       info.finish = source.finish;
+    }
+    if (source.failure !== undefined) {
+      requireValue(source.failure === "filtered" || source.failure === "interrupted");
+      info.failure = source.failure;
     }
     const partIDs = new Set<string>();
     const parts: DemoMessage["parts"] = [];
@@ -256,9 +260,13 @@ export function createDemoClient({ fetch: transport = globalThis.fetch, now = Da
       events?: { workspace(value: DemoWorkspace): void; error(message: string): void; expected?: Pick<DemoWorkspace, "mode" | "revision"> }): Promise<void> {
       requireValue(typeof text === "string" && text.trim().length > 0 && text.length <= 4000 && [...text].length <= 2000 && !turn);
       const used = lease();
+      const current = generation;
       await run(95_000, async (controller, check) => {
         turn = controller;
         let sessionID: string | undefined;
+        let latest: DemoMessage[] = [], target: string | undefined;
+        let reason: "filtered" | "interrupted" = "interrupted";
+        let pendingWorkspace: DemoWorkspace | undefined;
         try {
           const expected = events?.expected;
           if (expected) requireValue((expected.mode === "work" || expected.mode === "code") && /^(original|[a-f0-9]{12})$/.test(expected.revision));
@@ -267,8 +275,21 @@ export function createDemoClient({ fetch: transport = globalThis.fetch, now = Da
             check();
             const value: unknown = JSON.parse(line);
             requireValue(record(value));
-            if (value.type === "done") return true;
-            if (value.type === "workspace") { events?.workspace(workspace(value.workspace)); return false; }
+            if (value.type === "done") {
+              const answer = latest.find(message => message.info.id === target);
+              requireValue(answer?.info.finish === "stop" && answer.info.time.completed !== undefined && !answer.info.failure);
+              onSnapshot(latest);
+              if (pendingWorkspace) events?.workspace(pendingWorkspace);
+              return true;
+            }
+            if (value.type === "interrupted") {
+              requireValue(value.reason === "filtered" || value.reason === "interrupted");
+              reason = value.reason;
+              throw failure();
+            }
+            if (value.type === "workspace") {
+              requireValue(!pendingWorkspace); pendingWorkspace = workspace(value.workspace); return false;
+            }
             if (value.type === "workspace-error") {
               requireValue(typeof value.error === "string" && value.error.length <= 200);
               events?.error(value.error); return false;
@@ -279,9 +300,18 @@ export function createDemoClient({ fetch: transport = globalThis.fetch, now = Da
             requireValue(!sessionID || !nextSession || sessionID === nextSession);
             sessionID ??= nextSession;
             check();
-            onSnapshot(clean);
+            latest = clean;
+            const user = clean.findLast(message => message.info.role === "user");
+            target = clean.findLast(message => message.info.role === "assistant" && (!user || message.info.parentID === user.info.id))?.info.id;
+            // A snapshot is provisional until the transport confirms its accepted terminal reply.
+            onSnapshot(clean.map(message => message.info.id === target ? { ...message, info: { ...message.info,
+              finish: undefined, time: { created: message.info.time.created } } } : message));
             return false;
           });
+        } catch (error) {
+          if (current === generation && target) onSnapshot(latest.map(message => message.info.id === target
+            ? { ...message, info: { ...message.info, failure: message.info.failure ?? reason } } : message));
+          throw error;
         } finally { if (turn === controller) turn = undefined; }
       }, signal);
     },

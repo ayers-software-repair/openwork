@@ -35,7 +35,8 @@ const initial = { mode: "work", filename: "proposal.md", source: "sample proposa
   revision: "original", checks: [], changes: [], preview: `/demo/preview/${"a".repeat(48)}`,
   originalPreview: `/demo/preview/${"a".repeat(48)}`, revisions: [] };
 
-test("real demo mounts consent, leased Work and Code, shared smooth chat and selected-answer report review", async () => {
+test.each([true, false])("mounted demo preserves terminal acceptance and mode recovery: completed=%s", async complete => {
+  mountConsent.mockClear(); mountChat.mockClear(); mountReport.mockClear();
   // Happy DOM reports its deliberately disabled iframe load; real preview behavior is browser-tested.
   const browserLogs: unknown[][] = [];
   const browserConsole = spyOn(globalThis.console, "error").mockImplementation((...values: unknown[]) => { browserLogs.push(values); });
@@ -55,6 +56,19 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
       expect(JSON.parse(String(init?.body))).toEqual({ mode: "code" });
       actual = { ...initial, mode: "code", filename: "index.html", source: "<!doctype html>" };
       throw new Error("Mode changed but its response was lost");
+    }
+    if (path === "/demo/prompt") {
+      const sessionID = `ses_${"0".repeat(12)}${"S".repeat(14)}`;
+      const userID = `msg_${"1".repeat(12)}${"U".repeat(14)}`;
+      const answerID = `msg_${"2".repeat(12)}${"A".repeat(14)}`;
+      const entry = (id: string, role: string, text: string) => ({ info: { id, sessionID, role,
+        time: { created: 1, ...(role === "assistant" ? { completed: 2 } : {}) },
+        ...(role === "assistant" ? { parentID: userID, finish: "stop" } : {}) },
+        parts: [{ id: `prt_${"3".repeat(12)}${(role === "user" ? "U" : "A").repeat(14)}`, sessionID, messageID: id, type: "text", text }] });
+      if (!complete) actual = { ...actual, revision: "a".repeat(12), source: "Unconfirmed update", preview: `/demo/preview/${"b".repeat(48)}` };
+      return new Response(JSON.stringify({ type: "snapshot", messages: [entry(userID, "user", "selected question"),
+        entry(answerID, "assistant", "selected answer")] }) + "\n" + JSON.stringify(complete
+          ? { type: "done" } : { type: "workspace", workspace: actual }) + "\n");
     }
     if (path === "/demo/close") return Response.json({ closed: true });
     throw new Error("Unexpected request: " + path);
@@ -84,7 +98,18 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
     expect(calls.some(call => call.path === "/demo/prompt")).toBe(false);
     expect(activeHost().store.getSnapshot().suggestions[0]?.prompt).toContain("mobile menu");
     await act(async () => { activeHost().onReport({ question: "selected question", answer: "selected answer" }); });
-    expect(mountReport.mock.calls[0]?.[1].draft).toEqual({ question: "selected question", answer: "selected answer", note: "" });
+    expect(mountReport.mock.calls).toHaveLength(0);
+    await act(async () => {
+      const sent = activeHost().onNew({ content: [{ type: "text", text: "selected question" }] });
+      if (complete) await sent; else await expect(sent).rejects.toThrow();
+    });
+    await act(async () => { activeHost().onReport({ question: "selected question", answer: "selected answer" }); });
+    if (complete) expect(mountReport.mock.calls[0]?.[1].draft).toEqual({ question: "selected question", answer: "selected answer", note: "" });
+    else {
+      expect(mountReport.mock.calls).toHaveLength(0);
+      expect(container.querySelector("iframe")?.getAttribute("src")).toBe(initial.preview);
+      expect(calls.filter(call => call.path === "/demo/workspace")).toHaveLength(2);
+    }
     expect(calls.some(call => call.path === "/demo/reports")).toBe(false);
   } finally {
     await act(async () => { root.unmount(); for (let i = 0; i < 20; i++) await Promise.resolve(); });
@@ -94,4 +119,25 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
   expect(browserLogs.length).toBe(1);
   expect(browserLogs.every(values => values.map(String).join(" ").includes("Iframe page loading is disabled"))).toBe(true);
   expect(calls.at(-1)).toEqual({ path: "/demo/close", method: "POST" });
+});
+
+
+test("shared chat labels partials and only opens reports for positively completed answers", async () => {
+  const { SharedConversation } = await import("../src/react-app/demo/demo-chat");
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container); const report = mock(() => {});
+  const question = { info: { id: "user", sessionID: "session", role: "user" as const, time: { created: 1 } }, parts: [{ id: "p1", sessionID: "session", messageID: "user", type: "text" as const, text: "Question" }] };
+  const answer = { info: { id: "answer", sessionID: "session", parentID: "user", role: "assistant" as const, time: { created: 2, completed: 3 }, finish: "stop" }, parts: [{ id: "p2", sessionID: "session", messageID: "answer", type: "text" as const, text: "Safe answer" }] };
+  try {
+    for (const failure of ["filtered", "interrupted", undefined] as const) {
+      await act(async () => { root.render(<SharedConversation kit={{ mountChat, mountConsent, mountReport }}
+        messages={[question, { ...answer, info: { ...answer.info, failure } }]} busy={false} disabled={false} epoch={1}
+        suggestions={[]} send={async () => {}} stop={async () => {}} report={report} />); });
+      const status = activeHost().store.getSnapshot().messages[1].status;
+      expect(status?.type).toBe(failure ? "incomplete" : "complete");
+      if (failure) expect(status?.error).toContain(failure === "filtered" ? "filtered" : "interrupted");
+      activeHost().onReport({ question: "Question", answer: "Safe answer" });
+      expect(report.mock.calls.length).toBe(failure ? 0 : 1);
+    }
+  } finally { await act(async () => root.unmount()); container.remove(); }
 });

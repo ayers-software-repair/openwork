@@ -1,110 +1,97 @@
 // Copyright Ayers Electronics Inc. All rights reserved.
 /** @jsxImportSource react */
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { afterAll, expect, mock, spyOn, test } from "bun:test";
+import * as React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import type { DemoKit } from "../src/react-app/demo/demo-chat";
 
-const ownedDom = typeof window === "undefined";
-if (ownedDom) GlobalRegistrator.register({ url: "http://localhost:5173/" });
-const previousActEnvironment: unknown = Reflect.get(globalThis, "IS_REACT_ACT_ENVIRONMENT");
+const ownedDom = typeof document === "undefined";
+if (ownedDom) GlobalRegistrator.register({ url: "https://demo.howland.si/", settings: { disableIframePageLoading: true } });
+const previousActEnvironment = Reflect.get(globalThis, "IS_REACT_ACT_ENVIRONMENT");
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
-
-type ConsentOptions = { words: Record<string, string>; onAccept(): void | Promise<void> };
 let acceptance: Promise<void> | undefined;
-const mountConsent = mock((element: HTMLElement, options: ConsentOptions) => {
-  const button = document.createElement("button");
-  button.textContent = options.words.accept;
-  button.addEventListener("click", () => { acceptance = Promise.resolve(options.onAccept()); });
-  element.replaceChildren(button);
-  return { unmount() { button.remove(); } };
+let host: Parameters<DemoKit["mountChat"]>[0] | undefined;
+const mountConsent = mock<DemoKit["mountConsent"]>((element, options) => {
+  const button = document.createElement("button"); button.textContent = options.words.accept;
+  button.onclick = () => { acceptance = Promise.resolve(options.onAccept()); };
+  element.append(button); return { unmount() { button.remove(); } };
 });
-const mountReport = mock(() => { throw new Error("Unexpected report dialog"); });
-mock.module("/vendor/chat/chat.js", () => ({ mountConsent, mountReport }));
-
+const mountChat = mock<DemoKit["mountChat"]>((value, element) => {
+  host = value;
+  const input = document.createElement("textarea"); input.setAttribute("aria-label", value.words.composer);
+  element.append(input); return { unmount() { input.remove(); } };
+});
+const mountReport = mock<DemoKit["mountReport"]>(() => ({ unmount() {} }));
+mock.module("/vendor/chat/chat.js", () => ({ mountConsent, mountReport, mountChat }));
 afterAll(async () => {
   Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", previousActEnvironment);
   if (ownedDom) await GlobalRegistrator.unregister();
 });
 
-test("consent mounts the real empty demo composer with only public browser providers", async () => {
-  const token = "A".repeat(64);
-  const calls: { path: string; method: string }[] = [];
+function activeHost() { if (!host) throw new Error("Shared chat did not mount"); return host; }
+const initial = { mode: "work", filename: "proposal.md", source: "sample proposal", original: "sample proposal",
+  revision: "original", checks: [], changes: [], preview: `/demo/preview/${"a".repeat(48)}`,
+  originalPreview: `/demo/preview/${"a".repeat(48)}`, revisions: [] };
+
+test("real demo mounts consent, leased Work and Code, shared smooth chat and selected-answer report review", async () => {
+  // Happy DOM reports its deliberately disabled iframe load; real preview behavior is browser-tested.
+  const browserLogs: unknown[][] = [];
+  const browserConsole = spyOn(globalThis.console, "error").mockImplementation((...values: unknown[]) => { browserLogs.push(values); });
+  const token = "A".repeat(64), calls: { path: string; method: string }[] = [];
+  let actual = initial;
   const network = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const path = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
-    const method = init?.method ?? "GET";
-    calls.push({ path, method });
-    if (path === "/demo/session" && method === "POST") {
+    const method = init?.method ?? "GET"; calls.push({ path, method });
+    if (path === "/demo/session") {
       expect(JSON.parse(String(init?.body))).toEqual({ consentVersion: "claude-demo-1" });
       return Response.json({ token, expiresAt: new Date(Date.now() + 30 * 60_000).toISOString() });
     }
-    if (path === "/demo/close" && method === "POST") {
-      expect(JSON.parse(String(init?.body))).toEqual({});
-      expect(new Headers(init?.headers).get("X-Demo-Session")).toBe(token);
-      return Response.json({ closed: true });
+    expect(new Headers(init?.headers).get("X-Demo-Session")).toBe(token);
+    if (path === "/demo/workspace") return Response.json(actual);
+    if (path.startsWith("/demo/page/")) return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "content-type": "image/png" } });
+    if (path === "/demo/mode") {
+      expect(JSON.parse(String(init?.body))).toEqual({ mode: "code" });
+      actual = { ...initial, mode: "code", filename: "index.html", source: "<!doctype html>" };
+      throw new Error("Mode changed but its response was lost");
     }
-    throw new Error("Unexpected demo network request: " + path);
+    if (path === "/demo/close") return Response.json({ closed: true });
+    throw new Error("Unexpected request: " + path);
   });
-  const container = document.createElement("div");
-  document.body.append(container);
+  const container = document.createElement("div"); document.body.append(container);
   const renderErrors: unknown[] = [];
-  const root = createRoot(container, {
-    onUncaughtError: (error) => { renderErrors.push(error); },
-    onCaughtError: (error) => { renderErrors.push(error); },
-  });
-  const query = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+  const root = createRoot(container, { onUncaughtError: error => { renderErrors.push(error); }, onCaughtError: error => { renderErrors.push(error); } });
   try {
-    // Lexical must see a registered DOM at initialization; no app component is mocked.
     const { DemoApp } = await import("../src/react-app/demo/demo-app");
-    const { TooltipProvider } = await import("../src/components/ui/tooltip");
-    const { PlatformProvider, createDefaultPlatform } = await import("../src/react-app/kernel/platform");
-    const { initLocale } = await import("../src/i18n");
-    const { getNearestEditorFromDOMNode } = await import("lexical");
-    initLocale();
-    await act(async () => {
-      // Mirror demo-main.tsx; a DesktopConfigProvider is deliberately absent.
-      root.render(<QueryClientProvider client={query}><TooltipProvider>
-        <PlatformProvider value={createDefaultPlatform()}><DemoApp /></PlatformProvider>
-      </TooltipProvider></QueryClientProvider>);
-    });
-    expect(renderErrors).toEqual([]);
-    expect(mountConsent).toHaveBeenCalledTimes(1);
+    await act(async () => { root.render(<DemoApp />); });
     expect(calls).toEqual([]);
-    const start = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Start conversation");
-    if (!start) throw new Error("Public consent did not mount");
-    await act(async () => {
-      start.click();
-      if (!acceptance) throw new Error("Start did not invoke the actual consent callback");
-      await acceptance;
-    });
+    expect(mountConsent.mock.calls[0]?.[1].words.title).toBe("Try Howland");
+    expect(mountConsent.mock.calls[0]?.[1].words.body).not.toContain("Claude");
+    const start = container.querySelector("button"); if (!start) throw new Error("Consent is missing");
+    await act(async () => { start.click(); await acceptance; });
     expect(renderErrors).toEqual([]);
-    const editor = container.querySelector<HTMLElement>('.howland-demo-compose [contenteditable="true"]');
-    if (!editor) throw new Error("The actual demo Lexical composer did not mount after consent");
-    expect(getNearestEditorFromDOMNode(editor)).not.toBeNull();
-    expect(container.querySelector(".howland-demo-empty h1")?.textContent).toBe("What would you like to work on?");
-    expect(Array.from(container.querySelectorAll(".howland-demo-empty button"), (button) => button.textContent)).toEqual([
-      "Help me plan a small business website.",
-      "Explain this code: const total = prices.reduce((sum, price) => sum + price, 0);",
-      "Draft a checklist for moving a project to a new computer.",
-    ]);
-    expect(container.querySelector(".howland-demo-status")?.textContent).toBe("");
-    expect(calls).toEqual([{ path: "/demo/session", method: "POST" }]);
-    expect(mountReport).not.toHaveBeenCalled();
+    expect(container.querySelector('[aria-label="Document workspace"]')).not.toBeNull();
+    expect(activeHost().flags.markdown).toBe(true);
+    expect(activeHost().flags.suggestionsFillDraft).toBe(true);
+    expect(activeHost().words.report).toBe("Report this");
+    expect(activeHost().store.getSnapshot().suggestions[0]?.prompt).toContain("21 June 2030");
+    const code = [...container.querySelectorAll("button")].find(button => button.textContent === "Code");
+    if (!code) throw new Error("Code mode is missing");
+    await act(async () => { code.click(); for (let i = 0; i < 30; i++) await Promise.resolve(); });
+    expect(container.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(container.querySelector(".howland-demo-status")?.textContent).toContain("switch could not be confirmed");
+    expect(calls.some(call => call.path === "/demo/prompt")).toBe(false);
+    expect(activeHost().store.getSnapshot().suggestions[0]?.prompt).toContain("mobile menu");
+    await act(async () => { activeHost().onReport({ question: "selected question", answer: "selected answer" }); });
+    expect(mountReport.mock.calls[0]?.[1].draft).toEqual({ question: "selected question", answer: "selected answer", note: "" });
+    expect(calls.some(call => call.path === "/demo/reports")).toBe(false);
   } finally {
-    try {
-      await act(async () => {
-        root.unmount();
-        // Settle the real client's asynchronous close before restoring fetch.
-        for (let turn = 0; turn < 20; turn++) await Promise.resolve();
-      });
-    } finally {
-      query.clear();
-      container.remove();
-      network.mockRestore();
-    }
+    await act(async () => { root.unmount(); for (let i = 0; i < 20; i++) await Promise.resolve(); });
+    container.remove(); network.mockRestore(); browserConsole.mockRestore();
   }
   expect(renderErrors).toEqual([]);
-  expect(calls).toEqual([{ path: "/demo/session", method: "POST" }, { path: "/demo/close", method: "POST" }]);
-  expect(mountReport).not.toHaveBeenCalled();
+  expect(browserLogs.length).toBe(1);
+  expect(browserLogs.every(values => values.map(String).join(" ").includes("Iframe page loading is disabled"))).toBe(true);
+  expect(calls.at(-1)).toEqual({ path: "/demo/close", method: "POST" });
 });

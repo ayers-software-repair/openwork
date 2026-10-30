@@ -20,6 +20,10 @@ function message(text = "Answer") {
 }
 const snapshot = (text = "Answer") => JSON.stringify({ type: "snapshot", messages: [message(text)] }) + "\n";
 const done = JSON.stringify({ type: "done" }) + "\n";
+const workspace = { mode: "work", filename: "proposal.md", original: "Original", source: "Revised",
+  revision: "a".repeat(12), checks: ["Two-page PDF generated"], changes: [{ before: "Original", after: "Revised" }],
+  preview: `/demo/preview/${"b".repeat(48)}`, originalPreview: `/demo/preview/${"c".repeat(48)}`,
+  revisions: [{ id: "a".repeat(12), mode: "work" }] };
 function response(...chunks: string[]): Response {
   return new Response(new ReadableStream<Uint8Array>({ start(controller) {
     for (const text of chunks) controller.enqueue(new TextEncoder().encode(text));
@@ -73,6 +77,35 @@ test("split NDJSON retains only typed text messages and requires done", async ()
     parts: [{ id: partID, sessionID, messageID, type: "text", text: "Café" }] });
   expect(new Headers(f.calls[1].init.headers).get("X-Demo-Session")).toBe(token);
   expect(JSON.parse(String(f.calls[1].init.body))).toEqual({ text: "Question" });
+  f.client.reset();
+});
+
+test("workspace results preserve lease binding and reject foreign preview URLs and oversized document bodies", async () => {
+  const f = fixture();
+  await expect(f.client.workspace()).rejects.toThrow();
+  expect(f.calls).toHaveLength(0);
+  await f.client.accept();
+  f.setHandler(async () => Response.json(workspace));
+  expect((await f.client.workspace("work")).revision).toBe(workspace.revision);
+  expect(JSON.parse(String(f.calls.at(-1)?.init.body))).toEqual({ mode: "work" });
+  expect(new Headers(f.calls.at(-1)?.init.headers).get("X-Demo-Session")).toBe(token);
+  f.setHandler(async () => Response.json({ ...workspace, preview: "https://foreign.test/preview" }));
+  await expect(f.client.workspace()).rejects.toThrow();
+  f.setHandler(async () => new Response(new Uint8Array(1024 * 1024 + 1), { headers: { "content-type": "application/pdf" } }));
+  await expect(f.client.document("current")).rejects.toThrow();
+  f.client.reset();
+});
+
+test("streamed workspace and check failure events are validated separately from the answer", async () => {
+  const f = fixture(); await f.client.accept();
+  const accepted: string[] = [], errors: string[] = [];
+  f.setHandler(async () => response(snapshot(), JSON.stringify({ type: "workspace", workspace }) + "\n", done));
+  await f.client.send("Question", () => {}, undefined, { expected: { mode: "work", revision: workspace.revision }, workspace: value => accepted.push(value.revision), error: value => errors.push(value) });
+  expect(JSON.parse(String(f.calls.at(-1)?.init.body))).toEqual({ text: "Question", mode: "work", revision: workspace.revision });
+  expect(accepted).toEqual([workspace.revision]); expect(errors).toEqual([]);
+  f.setHandler(async () => response(snapshot(), JSON.stringify({ type: "workspace-error", error: "The prior revision is preserved." }) + "\n", done));
+  await f.client.send("Question", () => {}, undefined, { workspace: value => accepted.push(value.revision), error: value => errors.push(value) });
+  expect(accepted).toHaveLength(1); expect(errors).toEqual(["The prior revision is preserved."]);
   f.client.reset();
 });
 

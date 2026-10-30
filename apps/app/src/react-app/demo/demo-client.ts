@@ -8,6 +8,9 @@ export type DemoMessage = {
 };
 export type DemoReportDraft = { id: string; question: string; answer: string; note: string };
 export type DemoReportReceipt = { id: string; state: "sent" | "queued"; url?: string };
+export type DemoWorkspace = { mode: "work" | "code"; filename: string; original: string; source: string;
+  revision: string; checks: string[]; changes: { before: string; after: string }[];
+  preview: string; originalPreview: string; revisions: { id: string; mode: "work" | "code" }[] };
 type Transport = (url: string, init: RequestInit) => Promise<Response>;
 type Session = { token: string; expiry: number };
 const MAX_BODY = 1024 * 1024;
@@ -27,6 +30,29 @@ function id(value: unknown, prefix: string): string {
 function timestamp(value: unknown): number {
   requireValue(typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
   return value;
+}
+function workspace(value: unknown): DemoWorkspace {
+  requireValue(record(value) && (value.mode === "work" || value.mode === "code")
+    && typeof value.filename === "string" && value.filename === (value.mode === "work" ? "proposal.md" : "index.html")
+    && typeof value.original === "string" && value.original.length <= 20_000
+    && typeof value.source === "string" && value.source.length <= 20_000
+    && typeof value.revision === "string" && /^(original|[a-f0-9]{12})$/.test(value.revision)
+    && typeof value.preview === "string" && /^\/demo\/preview\/[a-f0-9]{48}$/.test(value.preview)
+    && typeof value.originalPreview === "string" && /^\/demo\/preview\/[a-f0-9]{48}$/.test(value.originalPreview)
+    && Array.isArray(value.checks) && value.checks.length <= 8
+    && Array.isArray(value.changes) && value.changes.length <= 8
+    && Array.isArray(value.revisions) && value.revisions.length <= 8);
+  const checks = value.checks.map(item => { requireValue(typeof item === "string" && item.length <= 180); return item; });
+  const changes = value.changes.map(item => {
+    requireValue(record(item) && typeof item.before === "string" && item.before.length <= 4000 && typeof item.after === "string" && item.after.length <= 8000);
+    return { before: item.before, after: item.after };
+  });
+  const revisions = value.revisions.map((item): DemoWorkspace["revisions"][number] => {
+    requireValue(record(item) && typeof item.id === "string" && /^[a-f0-9]{12}$/.test(item.id) && (item.mode === "work" || item.mode === "code"));
+    return { id: item.id, mode: item.mode };
+  });
+  return { mode: value.mode, filename: value.filename, original: value.original, source: value.source,
+    revision: value.revision, checks, changes, preview: value.preview, originalPreview: value.originalPreview, revisions };
 }
 function messages(value: unknown): DemoMessage[] {
   requireValue(Array.isArray(value));
@@ -194,19 +220,59 @@ export function createDemoClient({ fetch: transport = globalThis.fetch, now = Da
       });
       if (session === used) this.reset();
     },
-    async send(text: string, onSnapshot: (value: DemoMessage[]) => void, signal?: AbortSignal): Promise<void> {
+    async workspace(mode?: "work" | "code"): Promise<DemoWorkspace> {
+      const used = lease();
+      return run(5000, async (controller, check) => {
+        const response = await request(mode ? "/demo/mode" : "/demo/workspace", mode ? "POST" : "GET", mode ? { mode } : undefined, controller, used);
+        const result = workspace(JSON.parse(await read(response, controller.signal)));
+        check(); return result;
+      });
+    },
+    async document(version: "original" | "current", page?: 1 | 2, signal?: AbortSignal): Promise<Blob> {
+      requireValue(version === "original" || version === "current");
+      requireValue(page === undefined || page === 1 || page === 2);
+      const used = lease();
+      return run(10_000, async (controller, check) => {
+        const path = page ? `/demo/page/${version}/${page}` : `/demo/document/${version}`;
+        const response = await request(path, "GET", undefined, controller, used);
+        requireValue(response.body && response.headers.get("content-type") === (page ? "image/png" : "application/pdf"));
+        const reader = response.body.getReader();
+        const chunks: Uint8Array<ArrayBuffer>[] = [];
+        let bytes = 0;
+        try {
+          while (true) {
+            const chunk = await cancellable(reader.read(), controller.signal);
+            check();
+            if (chunk.done) break;
+            bytes += chunk.value.length;
+            requireValue(bytes <= MAX_BODY);
+            chunks.push(new Uint8Array(chunk.value));
+          }
+          return new Blob(chunks, { type: page ? "image/png" : "application/pdf" });
+        } finally { void reader.cancel().catch(() => {}); reader.releaseLock(); }
+      }, signal);
+    },
+    async send(text: string, onSnapshot: (value: DemoMessage[]) => void, signal?: AbortSignal,
+      events?: { workspace(value: DemoWorkspace): void; error(message: string): void; expected?: Pick<DemoWorkspace, "mode" | "revision"> }): Promise<void> {
       requireValue(typeof text === "string" && text.trim().length > 0 && text.length <= 4000 && [...text].length <= 2000 && !turn);
       const used = lease();
       await run(95_000, async (controller, check) => {
         turn = controller;
         let sessionID: string | undefined;
         try {
-          const response = await request("/demo/prompt", "POST", { text }, controller, used);
+          const expected = events?.expected;
+          if (expected) requireValue((expected.mode === "work" || expected.mode === "code") && /^(original|[a-f0-9]{12})$/.test(expected.revision));
+          const response = await request("/demo/prompt", "POST", { text, ...(expected ? { mode: expected.mode, revision: expected.revision } : {}) }, controller, used);
           await read(response, controller.signal, (line) => {
             check();
             const value: unknown = JSON.parse(line);
             requireValue(record(value));
             if (value.type === "done") return true;
+            if (value.type === "workspace") { events?.workspace(workspace(value.workspace)); return false; }
+            if (value.type === "workspace-error") {
+              requireValue(typeof value.error === "string" && value.error.length <= 200);
+              events?.error(value.error); return false;
+            }
             requireValue(value.type === "snapshot");
             const clean = messages(value.messages);
             const nextSession = clean[0]?.info.sessionID;

@@ -56,6 +56,17 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
       actual = { ...initial, mode: "code", filename: "index.html", source: "<!doctype html>" };
       throw new Error("Mode changed but its response was lost");
     }
+    if (path === "/demo/prompt") {
+      const sessionID = `ses_${"0".repeat(12)}${"S".repeat(14)}`;
+      const userID = `msg_${"1".repeat(12)}${"U".repeat(14)}`;
+      const answerID = `msg_${"2".repeat(12)}${"A".repeat(14)}`;
+      const entry = (id: string, role: string, text: string) => ({ info: { id, sessionID, role,
+        time: { created: 1, ...(role === "assistant" ? { completed: 2 } : {}) },
+        ...(role === "assistant" ? { parentID: userID, finish: "stop" } : {}) },
+        parts: [{ id: `prt_${"3".repeat(12)}${(role === "user" ? "U" : "A").repeat(14)}`, sessionID, messageID: id, type: "text", text }] });
+      return new Response(JSON.stringify({ type: "snapshot", messages: [entry(userID, "user", "selected question"),
+        entry(answerID, "assistant", "selected answer")] }) + "\n" + JSON.stringify({ type: "done" }) + "\n");
+    }
     if (path === "/demo/close") return Response.json({ closed: true });
     throw new Error("Unexpected request: " + path);
   });
@@ -85,6 +96,9 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
     expect(activeHost().store.getSnapshot().suggestions[0]?.prompt).toContain("mobile menu");
     await act(async () => { activeHost().onReport({ question: "selected question", answer: "selected answer" }); });
     expect(mountReport.mock.calls).toHaveLength(0);
+    await act(async () => { await activeHost().onNew({ content: [{ type: "text", text: "selected question" }] }); });
+    await act(async () => { activeHost().onReport({ question: "selected question", answer: "selected answer" }); });
+    expect(mountReport.mock.calls[0]?.[1].draft).toEqual({ question: "selected question", answer: "selected answer", note: "" });
     expect(calls.some(call => call.path === "/demo/reports")).toBe(false);
   } finally {
     await act(async () => { root.unmount(); for (let i = 0; i < 20; i++) await Promise.resolve(); });

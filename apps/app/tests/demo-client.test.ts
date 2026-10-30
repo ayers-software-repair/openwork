@@ -100,7 +100,8 @@ test("streamed workspace and check failure events are validated separately from 
   const f = fixture(); await f.client.accept();
   const accepted: string[] = [], errors: string[] = [];
   f.setHandler(async () => response(snapshot(), JSON.stringify({ type: "workspace", workspace }) + "\n", done));
-  await f.client.send("Question", () => {}, undefined, { workspace: value => accepted.push(value.revision), error: value => errors.push(value) });
+  await f.client.send("Question", () => {}, undefined, { expected: { mode: "work", revision: workspace.revision }, workspace: value => accepted.push(value.revision), error: value => errors.push(value) });
+  expect(JSON.parse(String(f.calls.at(-1)?.init.body))).toEqual({ text: "Question", mode: "work", revision: workspace.revision });
   expect(accepted).toEqual([workspace.revision]); expect(errors).toEqual([]);
   f.setHandler(async () => response(snapshot(), JSON.stringify({ type: "workspace-error", error: "The prior revision is preserved." }) + "\n", done));
   await f.client.send("Question", () => {}, undefined, { workspace: value => accepted.push(value.revision), error: value => errors.push(value) });

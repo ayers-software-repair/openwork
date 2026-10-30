@@ -36,6 +36,7 @@ export function DemoApp() {
   const report = React.useRef<{ unmount(): void } | null>(null);
   const version = React.useRef(0);
   const stopPending = React.useRef(false);
+  const modePending = React.useRef(false);
   React.useEffect(() => {
     let live = true, released = false;
     const url = "/vendor/chat/chat.js";
@@ -73,18 +74,21 @@ export function DemoApp() {
   }, [workspace, kit, epoch, client]);
 
   async function send(text: string) {
-    if (request.current || stopPending.current || switching || !workspace || !text.trim()) return;
+    if (request.current || stopPending.current || modePending.current || !workspace || !text.trim()) return;
     if (!client.ready) throw new Error("Start a new conversation to continue.");
     if ([...text].length > 2000) throw new Error("Keep your message within 2,000 characters.");
     const current = version.current, controller = new AbortController(); request.current = controller;
     setBusy(true); setError("");
     try { await client.send(text, snapshot => { if (current === version.current) setMessages(snapshot); }, controller.signal, {
+      expected: { mode: workspace.mode, revision: workspace.revision },
       workspace: sample => { if (current === version.current) setWorkspace(sample); },
       error: message => { if (current === version.current) setError(message); },
     }); }
     catch (cause) {
-      if (current === version.current && !controller.signal.aborted)
+      if (current === version.current && !controller.signal.aborted) {
+        try { const actual = await client.workspace(); if (current === version.current) setWorkspace(actual); } catch {}
         setError(cause instanceof Error ? cause.message : "The request could not be completed.");
+      }
       throw cause;
     } finally { if (current === version.current) { request.current = null; setBusy(false); } }
   }
@@ -96,7 +100,7 @@ export function DemoApp() {
     finally { if (current === version.current) { stopPending.current = false; setStopping(false); } }
   }
   async function restart() {
-    if (!workspace || stopPending.current || request.current || switching) return;
+    if (!workspace || stopPending.current || request.current || modePending.current) return;
     const current = version.current; stopPending.current = true; setStopping(true); setError("");
     try { await client.close(); }
     catch { if (current === version.current) setError("The workspace could not be closed. Please try again."); return; }
@@ -106,11 +110,14 @@ export function DemoApp() {
     setWorkspace(null); setMessages([]); setEpoch(value => value + 1);
   }
   async function selectMode(mode: "work" | "code") {
-    if (!workspace || mode === workspace.mode || request.current || stopPending.current || switching) return;
-    const current = version.current; setSwitching(true); setError("");
+    if (!workspace || mode === workspace.mode || request.current || stopPending.current || modePending.current) return;
+    const current = version.current; modePending.current = true; setSwitching(true); setError("");
     try { const sample = await client.workspace(mode); if (current === version.current) setWorkspace(sample); }
-    catch { if (current === version.current) setError("The workspace could not switch modes. Try a new conversation."); }
-    finally { if (current === version.current) setSwitching(false); }
+    catch { if (current === version.current) {
+      try { const actual = await client.workspace(); if (current === version.current) setWorkspace(actual); } catch {}
+      setError("The switch could not be confirmed. Check the selected mode before continuing.");
+    } }
+    finally { if (current === version.current) { modePending.current = false; setSwitching(false); } }
   }
   function reportAnswer(draft: { question: string; answer: string }) {
     if (!kit || busy || stopping || !client.ready) return;

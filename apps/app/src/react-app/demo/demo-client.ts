@@ -253,14 +253,16 @@ export function createDemoClient({ fetch: transport = globalThis.fetch, now = Da
       }, signal);
     },
     async send(text: string, onSnapshot: (value: DemoMessage[]) => void, signal?: AbortSignal,
-      events?: { workspace(value: DemoWorkspace): void; error(message: string): void }): Promise<void> {
+      events?: { workspace(value: DemoWorkspace): void; error(message: string): void; expected?: Pick<DemoWorkspace, "mode" | "revision"> }): Promise<void> {
       requireValue(typeof text === "string" && text.trim().length > 0 && text.length <= 4000 && [...text].length <= 2000 && !turn);
       const used = lease();
       await run(95_000, async (controller, check) => {
         turn = controller;
         let sessionID: string | undefined;
         try {
-          const response = await request("/demo/prompt", "POST", { text }, controller, used);
+          const expected = events?.expected;
+          if (expected) requireValue((expected.mode === "work" || expected.mode === "code") && /^(original|[a-f0-9]{12})$/.test(expected.revision));
+          const response = await request("/demo/prompt", "POST", { text, ...(expected ? { mode: expected.mode, revision: expected.revision } : {}) }, controller, used);
           await read(response, controller.signal, (line) => {
             check();
             const value: unknown = JSON.parse(line);

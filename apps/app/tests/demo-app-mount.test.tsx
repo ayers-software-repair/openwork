@@ -40,6 +40,7 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
   const browserLogs: unknown[][] = [];
   const browserConsole = spyOn(globalThis.console, "error").mockImplementation((...values: unknown[]) => { browserLogs.push(values); });
   const token = "A".repeat(64), calls: { path: string; method: string }[] = [];
+  let actual = initial;
   const network = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const path = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
     const method = init?.method ?? "GET"; calls.push({ path, method });
@@ -48,11 +49,12 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
       return Response.json({ token, expiresAt: new Date(Date.now() + 30 * 60_000).toISOString() });
     }
     expect(new Headers(init?.headers).get("X-Demo-Session")).toBe(token);
-    if (path === "/demo/workspace") return Response.json(initial);
+    if (path === "/demo/workspace") return Response.json(actual);
     if (path.startsWith("/demo/page/")) return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "content-type": "image/png" } });
     if (path === "/demo/mode") {
       expect(JSON.parse(String(init?.body))).toEqual({ mode: "code" });
-      return Response.json({ ...initial, mode: "code", filename: "index.html", source: "<!doctype html>" });
+      actual = { ...initial, mode: "code", filename: "index.html", source: "<!doctype html>" };
+      throw new Error("Mode changed but its response was lost");
     }
     if (path === "/demo/close") return Response.json({ closed: true });
     throw new Error("Unexpected request: " + path);
@@ -78,6 +80,8 @@ test("real demo mounts consent, leased Work and Code, shared smooth chat and sel
     if (!code) throw new Error("Code mode is missing");
     await act(async () => { code.click(); for (let i = 0; i < 30; i++) await Promise.resolve(); });
     expect(container.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(container.querySelector(".howland-demo-status")?.textContent).toContain("switch could not be confirmed");
+    expect(calls.some(call => call.path === "/demo/prompt")).toBe(false);
     expect(activeHost().store.getSnapshot().suggestions[0]?.prompt).toContain("mobile menu");
     await act(async () => { activeHost().onReport({ question: "selected question", answer: "selected answer" }); });
     expect(mountReport.mock.calls[0]?.[1].draft).toEqual({ question: "selected question", answer: "selected answer", note: "" });

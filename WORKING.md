@@ -17,6 +17,14 @@ prepared receipt and reuses the same desktop bytes on `ayers-software-repair/how
 Phones install from stores only and nothing side-loads (owner, D1625); vendor submissions use
 the separately verified store bundle and enabled targets.
 
+## Demo native source pin, 30 October 2026
+
+The prepared source pin is `v1.19.3-howland.2` at
+`cdfc6c30c3bc088510a92aa561963a105eb9a6bc`, containing the reviewed opt-in dispatch guard.
+Howland's public demo builds that exact source privately on its ARM runner; this change does not
+publish a native release. Desktop preparation still requires the matching published sidecar and
+its provenance through the existing preflight. No desktop release is started by this source pin.
+
 ## Shared release verification, 27 October 2026
 
 Workflow references use platform v0.76.0. Preparation and publication require current

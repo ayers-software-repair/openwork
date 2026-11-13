@@ -236,10 +236,36 @@ function createSyncClient(baseUrl: string, openworkToken: string) {
     : createClient(baseUrl, undefined, { token: openworkToken, mode: "openwork" });
 }
 
-const defaultSyncSubscriptionFactory: SyncSubscriptionFactory = async (baseUrl, openworkToken, signal) => {
+export const defaultSyncSubscriptionFactory: SyncSubscriptionFactory = async (baseUrl, openworkToken, signal) => {
   const client = createSyncClient(baseUrl, openworkToken);
-  const subscription = await client.event.subscribe(undefined, { signal });
-  return subscription.stream;
+  if (isOpencodeV2BaseUrl(baseUrl)) {
+    return (await client.event.subscribe(undefined, { signal })).stream;
+  }
+  let transportError: unknown;
+  const subscription = await client.event.subscribe(undefined, {
+    signal,
+    sseMaxRetryAttempts: 1,
+    onSseError: (error: unknown) => {
+      const status = error instanceof Error ? /^SSE failed: (\d{3})(?: |$)/.exec(error.message)?.[1] : undefined;
+      transportError = status ? Object.assign(new Error("Event stream request failed"), { status: Number(status) }) : error;
+    },
+  });
+  const iterator = subscription.stream[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  if (first.done) throw transportError ?? new Error("Event stream closed before readiness");
+  return (async function* () {
+    try {
+      yield first.value;
+      while (true) {
+        const next = await iterator.next();
+        if (next.done) break;
+        yield next.value;
+      }
+      if (transportError) throw transportError;
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  })();
 };
 
 const defaultSessionStatusFetcher: SessionStatusFetcher = async (baseUrl, openworkToken, signal) => {

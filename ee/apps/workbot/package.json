@@ -13,12 +13,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@hono/node-server": "2.0.12",
+    "@hono/node-server": "2.1.6",
     "@openwork-ee/headless-protocol": "workspace:*",
     "@openwork-ee/workbot-server": "workspace:*",
     "@openwork-ee/workbot-ui": "workspace:*",
     "@tanstack/react-query": "^5.96.2",
-    "hono": "4.13.9",
+    "hono": "4.13.16",
     "react": "catalog:",
     "react-dom": "catalog:",
     "zod": "^4.3.6"

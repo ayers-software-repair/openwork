@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@opencode-ai/sdk": "^1.18.15",
     "@openwork/browser-tabs": "workspace:*",
     "@openwork/enterprise-mcp-client": "workspace:*",
@@ -45,7 +45,7 @@
     "jsonc-parser": "^3.2.1",
     "minimatch": "^10.2.5",
     "node-pty": "npm:@lydell/node-pty@1.2.0-beta.12",
-    "undici": "6.28.1",
+    "undici": "6.29.1",
     "yaml": "^2.9.0",
     "zod": "^4.3.6"
   },

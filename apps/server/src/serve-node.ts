@@ -154,6 +154,11 @@ export async function writeWebResponse(webRes: Response, nodeRes: ServerResponse
     return;
   }
 
+  // An idle SSE stream must acknowledge admission before its first event.
+  if (webRes.headers.get("content-type")?.split(";")[0].trim().toLowerCase() === "text/event-stream") {
+    nodeRes.flushHeaders();
+  }
+
   const reader = webRes.body.getReader();
   let completed = false;
   let cancelled = false;
